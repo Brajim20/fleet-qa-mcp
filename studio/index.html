@@ -21,7 +21,7 @@
   .qa{
     --bg:#0d0f13; --surface:#1a1f27; --surface2:#242a33; --well:#14181f; --border:#333a45;
     --text:#bebebf; --text2:#d6dae4; --text3:#969db0;
-    --accent:#6a67fe; --accent-over:#5d5ae7; --accent-tint:rgba(106,103,254,.15);
+    --accent:#00c28b; --accent-over:#00a878; --accent-tint:rgba(0,194,139,.15);
     --green:#00c28b; --green-over:#00a878; --purple:#ae6ddf;
     --danger:#ff5c83; --success:#3db67b; --warning:#ebbc43; --error:#d66c7b;
     --code-bg:#11152b; --code-fg:#e8eaf0;
@@ -29,7 +29,7 @@
   .qa.theme-light{
     --bg:#f9fafc; --surface:#ffffff; --surface2:#f4f4f6; --well:#f4f4f6; --border:#e2e4ea;
     --text:#1a1c21; --text2:#515774; --text3:#8b8fa2;
-    --accent-tint:rgba(106,103,254,.10);
+    --accent-tint:rgba(0,194,139,.10);
     --code-bg:#192147; --code-fg:#e8eaf0;
   }
   .qa, .qa *{ box-sizing:border-box; }
@@ -75,14 +75,23 @@ const Svg = ({d, w=16, h=16, fill='none', stroke='currentColor', sw=2, vb='0 0 2
     {d ? d.split('|').map((p,i)=><path key={i} d={p}/>) : children}
   </svg>;
 
-const FleetLogo = ({size=26, white}) => (
-  <span style={{width:size,height:size,borderRadius:5,flex:'none',display:'grid',
-    gridTemplateColumns:'repeat(3,1fr)',gap:size*0.12,padding:size*0.18,
-    background: white ? '#192147' : 'linear-gradient(135deg,#009a7d,#6a67fe)'}}>
-    {[0,1,2,3,4,5,6,7,8].map(i=>(
-      <span key={i} style={{borderRadius:'50%',background:[0,2,4,6,8].includes(i)?'#fff':'rgba(255,255,255,.45)'}}/>
-    ))}
-  </span>
+// Target instance resolution (mirrors the fleet-qa-mcp resolver):
+//   ?instance=<url> query param  →  DEFAULT_INSTANCE  →  localhost fallback.
+const DEFAULT_INSTANCE = 'https://brayan.ngrok.app';   // ← your instance; set '' to fall back to localhost
+const INSTANCE_URL = (new URLSearchParams(location.search).get('instance') || DEFAULT_INSTANCE || 'http://localhost:8080').replace(/\/+$/,'');
+const INSTANCE_HOST = (() => { try { return new URL(INSTANCE_URL).host; } catch(e){ return INSTANCE_URL; } })();
+const shortVer = (v) => (v||'').replace(/\.\d{6,}.*$/,'');   // "4.87.0-rc.2606171916" → "4.87.0-rc"
+
+// Official Fleet logo — the colored dot "F" (from fleetdm/fleet assets/images/fleet-logo.svg)
+const FleetLogo = ({size=26}) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{flex:'none',display:'block'}}>
+    <circle cx="2.98" cy="3"  r="2.98" fill="#63C740"/>
+    <circle cx="11.91" cy="3"  r="2.98" fill="#5CABDF"/>
+    <circle cx="20.84" cy="3"  r="2.98" fill="#D66C7B"/>
+    <circle cx="2.98" cy="12" r="2.98" fill="#C98DEF"/>
+    <circle cx="11.91" cy="12" r="2.98" fill="#FAA669"/>
+    <circle cx="2.98" cy="21" r="2.98" fill="#3AEFC4"/>
+  </svg>
 );
 
 // ===================== APP LOGIC (ported from the .dc.html DCLogic) =====================
@@ -91,7 +100,18 @@ class Studio extends React.Component {
     theme: 'dark', view: 'dashboard', activeId: null, openSteps: {}, modal: null,
     verdict: null, confirmed: {}, copied: false, targetOpen: false,
     urlInput: 'https://github.com/fleetdm/fleet/issues/47712', toast: null, running: false, runTick: 0,
+    // Resolved target instance (version/rev filled live from the instance when reachable).
+    inst: { version: '4.87.0-rc.2606171916', rev: '9c17a71c43', tier: 'Premium', built: 'Jun 17, 2026 19:16 UTC', connected: true },
   };
+
+  componentDidMount(){
+    // Best-effort live read of the resolved instance's deployed build.
+    // CORS/unreachable → silently keep the configured defaults.
+    fetch(INSTANCE_URL + '/api/latest/fleet/version', { headers: { 'ngrok-skip-browser-warning': 'true' } })
+      .then(r => r.ok ? r.json() : null)
+      .then(v => { if (v && v.version) this.setState(s => ({ inst: { ...s.inst, version: v.version, rev: (v.revision || s.inst.rev).slice(0,10), connected: true } })); })
+      .catch(() => {});
+  }
 
   investigations = [
     { number:47712, title:'Self-service: editing software on a team with no categories errors the Categories picker',
@@ -188,8 +208,8 @@ class Studio extends React.Component {
       issueBody:'On a team that has zero software categories configured, opening the Edit dialog for a self-service software title throws in the Categories picker. The dropdown never renders and the page surfaces a JS error.',
       repro:['Go to Software → select a team with no categories','Open a self-service title → Edit','Observe: Categories picker crashes — TypeError: categories is not iterable'],
       labels:['bug','#g-software','reproduced','~release-blocker'] },
-    { kind:'target', title:'Resolve target', tool:'whoami', summary:'dogfood.fleetdm.com · 4.87.0-rc · rev 9c17a71c43',
-      fields:[{k:'Instance',v:'dogfood.fleetdm.com'},{k:'Tier',v:'Premium'},{k:'Deployed version',v:'4.87.0-rc.2606171916'},{k:'Git revision',v:'9c17a71c43'}],
+    { kind:'target', title:'Resolve target', tool:'whoami', summary:''+INSTANCE_HOST+' · 4.87.0-rc · rev 9c17a71c43',
+      fields:[{k:'Instance',v:''+INSTANCE_HOST+''},{k:'Tier',v:'Premium'},{k:'Deployed version',v:'4.87.0-rc.2606171916'},{k:'Git revision',v:'9c17a71c43'}],
       caveat:'Deployed rev is an RC build cut from release-4.87 — newer than the reported 4.86.1.' },
     { kind:'reproduce', sub:'api', title:'Reproduce in live browser', tool:'browser + API', summary:'API returns [] not null; empty-state renders; no exception',
       api:{ method:'GET', path:'/api/latest/fleet/software/titles?team_id=14&available_for_install=true', status:200, body:'{\n  "software_titles": [ … 12 items ],\n  "categories": [],\n  "count": 12\n}' },
@@ -231,8 +251,8 @@ class Studio extends React.Component {
       issueBody:"When switching from one policy to another, the previous policy's body content stays painted for a moment before the new policy hydrates — a brief but visible flash of stale content.",
       repro:['Open Policies → select policy A','Click policy B in the list',"Observe: policy A's description flashes for a few frames before B renders"],
       labels:['bug','#g-mdm','reproduced','visual'] },
-    { kind:'target', title:'Resolve target', tool:'whoami', summary:'dogfood.fleetdm.com · 4.87.0-rc · rev 9c17a71c43',
-      fields:[{k:'Instance',v:'dogfood.fleetdm.com'},{k:'Tier',v:'Premium'},{k:'Deployed version',v:'4.87.0-rc.2606171916'},{k:'Git revision',v:'9c17a71c43'}],
+    { kind:'target', title:'Resolve target', tool:'whoami', summary:''+INSTANCE_HOST+' · 4.87.0-rc · rev 9c17a71c43',
+      fields:[{k:'Instance',v:''+INSTANCE_HOST+''},{k:'Tier',v:'Premium'},{k:'Deployed version',v:'4.87.0-rc.2606171916'},{k:'Git revision',v:'9c17a71c43'}],
       caveat:'Timing bug — measured against this exact rev; flash duration may vary with network latency.' },
     { kind:'reproduce', sub:'sampler', title:'Reproduce with frame sampler', tool:'frame sampler', summary:'stale content visible ~3 frames (≈50ms) after switch',
       samplerMeta:'16 frames @ 60fps', trigger:'Click "macOS — require FileVault" → "Windows — disk encryption"',
@@ -270,8 +290,8 @@ class Studio extends React.Component {
       issueBody:'Reporter believes the settings nav background lags behind the table background during the dark→light theme transition, causing a momentary mismatch.',
       repro:['Open Settings','Toggle the theme','Observe (reported): nav appears to change color a beat after the table'],
       labels:['bug','#g-mdm','needs-repro','dark-mode'] },
-    { kind:'target', title:'Resolve target', tool:'whoami', summary:'dogfood.fleetdm.com · 4.87.0-rc · rev 9c17a71c43',
-      fields:[{k:'Instance',v:'dogfood.fleetdm.com'},{k:'Tier',v:'Premium'},{k:'Deployed version',v:'4.87.0-rc.2606171916'},{k:'Git revision',v:'9c17a71c43'}],
+    { kind:'target', title:'Resolve target', tool:'whoami', summary:''+INSTANCE_HOST+' · 4.87.0-rc · rev 9c17a71c43',
+      fields:[{k:'Instance',v:''+INSTANCE_HOST+''},{k:'Tier',v:'Premium'},{k:'Deployed version',v:'4.87.0-rc.2606171916'},{k:'Git revision',v:'9c17a71c43'}],
       caveat:'Visual/timing claim — sampled per frame against this exact rev.' },
     { kind:'reproduce', sub:'sampler', title:'Reproduce with frame sampler', tool:'frame sampler', summary:'nav and table interpolate in lockstep — no desync',
       samplerMeta:'16 frames @ 60fps · 300ms transition', trigger:'Toggle theme dark → light on Settings',
@@ -309,8 +329,8 @@ class Studio extends React.Component {
         issueBody:'Reported by '+inv.reporter+' on Fleet '+inv.reportedVersion+'. Investigation gathers evidence against the live deployed build before a verdict is set.',
         repro:['See reported steps in the GitHub issue','Run remaining checks to reproduce against the deployed build'],
         labels:['bug',inv.area,'needs-repro'] },
-      { kind:'target', title:'Resolve target', tool:'whoami', summary:'dogfood.fleetdm.com · 4.87.0-rc · rev 9c17a71c43',
-        fields:[{k:'Instance',v:'dogfood.fleetdm.com'},{k:'Tier',v:'Premium'},{k:'Deployed version',v:'4.87.0-rc.2606171916'},{k:'Git revision',v:'9c17a71c43'}],
+      { kind:'target', title:'Resolve target', tool:'whoami', summary:''+INSTANCE_HOST+' · 4.87.0-rc · rev 9c17a71c43',
+        fields:[{k:'Instance',v:''+INSTANCE_HOST+''},{k:'Tier',v:'Premium'},{k:'Deployed version',v:'4.87.0-rc.2606171916'},{k:'Git revision',v:'9c17a71c43'}],
         caveat:'Pinned to the deployed RC build for every read.' },
       mk('reproduce',3,'Reproduce in live browser','browser + API','queued — run to gather evidence','reproduced against deployed build'),
       mk('rootcause',4,'Root cause at deployed rev','code @ rev','queued','located relevant source at rev 9c17a71c'),
@@ -330,7 +350,7 @@ class Studio extends React.Component {
     const inv = this.active; if (!inv) return { title:'', body:'', labels:[] };
     return {
       title:'[QA] '+inv.title,
-      body:'### Fleet version\n4.87.0-rc.2606171916 (rev 9c17a71c43, Premium) — dogfood.fleetdm.com\n\n### What happened\n'+this.qaComment()+'\n\n### Evidence attached\n- Live API response\n- Browser screenshots / frame samples\n- Source at deployed revision\n- Build-check result\n\n_Drafted by Fleet QA Studio — review before submitting._',
+      body:'### Fleet version\n4.87.0-rc.2606171916 (rev 9c17a71c43, Premium) — '+INSTANCE_HOST+'\n\n### What happened\n'+this.qaComment()+'\n\n### Evidence attached\n- Live API response\n- Browser screenshots / frame samples\n- Source at deployed revision\n- Build-check result\n\n_Drafted by Fleet QA Studio — review before submitting._',
       labels:['bug', inv.area, inv.verdict==='Confirmed bug' ? '~release-blocker' : 'qa-verified'],
     };
   }
@@ -393,7 +413,7 @@ class Studio extends React.Component {
       runLabel: s.running?'Running…':'Run remaining checks',
       verdictOptions, verdictConfirmed, verdictUnconfirmed:!verdictConfirmed, confirmedBy:this.USER.name,
       qaComment:this.qaComment(), copyLabel:s.copied?'Copied':'Copy',
-      draftOpen:s.modal==='draft', draftTitle:d.title, draftBody:d.body, draftLabels:d.labels, toast:s.toast,
+      draftOpen:s.modal==='draft', draftTitle:d.title, draftBody:d.body, draftLabels:d.labels, toast:s.toast, inst:s.inst,
     };
   }
 
@@ -453,10 +473,10 @@ class Studio extends React.Component {
               <button onClick={this.toggleTarget} style={S("display:flex; align-items:center; gap:10px; height:38px; padding:0 12px; border:1px solid var(--border); background:var(--bg); border-radius:8px; color:var(--text2);")}>
                 <span style={S("position:relative; width:8px; height:8px; flex:none;")}><span style={S("position:absolute; inset:0; border-radius:50%; background:var(--success);")}/><span style={S("position:absolute; inset:-3px; border-radius:50%; border:1px solid var(--success); opacity:.4;")} className="qa-spin"/></span>
                 <span style={S("display:flex; flex-direction:column; align-items:flex-start; line-height:1.15;")}>
-                  <span style={S("font-size:11px; color:var(--text3);")}>dogfood.fleetdm.com</span>
-                  <span style={S("font-family:var(--font-mono); font-size:11.5px; color:var(--text);")}>4.87.0-rc · 9c17a71c</span>
+                  <span style={S("font-size:11px; color:var(--text3);")}>{INSTANCE_HOST}</span>
+                  <span style={S("font-family:var(--font-mono); font-size:11.5px; color:var(--text);")}>{shortVer(v.inst.version)} · {v.inst.rev.slice(0,8)}</span>
                 </span>
-                <span style={S("background:var(--accent-tint); color:var(--accent); font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px; letter-spacing:.03em;")}>PREMIUM</span>
+                <span style={S("background:var(--accent-tint); color:var(--accent); font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px; letter-spacing:.03em;")}>{(v.inst.tier||'').toUpperCase()}</span>
                 <Svg w={14} h={14} style={S("color:var(--text3);")} d="m6 9 6 6 6-6"/>
               </button>
               {v.targetOpen && (
@@ -466,7 +486,7 @@ class Studio extends React.Component {
                     <span style={S("display:flex; align-items:center; gap:6px; color:var(--success); font-size:11.5px; font-weight:600;")}><span style={S("width:7px; height:7px; border-radius:50%; background:var(--success);")}/>Connected</span>
                   </div>
                   <div style={S("display:flex; flex-direction:column; gap:10px; font-size:12.5px;")}>
-                    {[['Instance','dogfood.fleetdm.com'],['Tier','Premium'],['Deployed version','4.87.0-rc.2606171916'],['Git revision','9c17a71c43'],['Built','Jun 17, 2026 19:16 UTC']].map(([k,val])=>(
+                    {[['Instance',INSTANCE_HOST],['Tier',v.inst.tier],['Deployed version',v.inst.version],['Git revision',v.inst.rev],['Built',v.inst.built]].map(([k,val])=>(
                       <div key={k} style={S("display:flex; justify-content:space-between; gap:12px;")}><span style={S("color:var(--text3);")}>{k}</span><span style={{color: k==='Git revision'?'var(--accent)':'var(--text)', fontFamily: (k==='Instance'||k.includes('version')||k==='Git revision')?'var(--font-mono)':'inherit'}}>{val}</span></div>
                     ))}
                   </div>
