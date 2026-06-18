@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Brajim20/fleet-qa-mcp/internal/llm"
 	"github.com/Brajim20/fleet-qa-mcp/internal/qa"
 )
 
@@ -67,7 +68,8 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	out := map[string]any{"ok": true, "instance": hostOf(s.app.Inst.URL), "source": s.app.Inst.Source, "repo": s.app.Repo != ""}
+	_, agent := llm.NewFromEnv()
+	out := map[string]any{"ok": true, "instance": hostOf(s.app.Inst.URL), "source": s.app.Inst.Source, "repo": s.app.Repo != "", "agent": agent}
 	if v, err := s.app.Inst.DeployedVersion(); err == nil {
 		out["version"] = v.Version
 		out["rev"] = v.Revision

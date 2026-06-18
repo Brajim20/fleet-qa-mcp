@@ -114,7 +114,7 @@ class Studio extends React.Component {
     // with the mock data, and best-effort read the instance version directly.
     fetch('/api/health').then(r => r.ok ? r.json() : null).then(h => {
       if (h && h.ok) {
-        this.setState(s => ({ live: true, inst: { ...s.inst,
+        this.setState(s => ({ live: true, agent: !!h.agent, inst: { ...s.inst,
           version: h.version || s.inst.version, rev: (h.rev||s.inst.rev).slice(0,10),
           tier: (h.tier ? h.tier[0].toUpperCase()+h.tier.slice(1) : s.inst.tier),
           connected: !!h.connected, built: '' } }));
@@ -489,7 +489,7 @@ class Studio extends React.Component {
       isDashboard:s.view==='dashboard', isNew:s.view==='new', isDetail:s.view==='detail',
       crumb: s.view==='dashboard'?'Investigations':s.view==='new'?'New investigation':(crumbNum?'#'+crumbNum:'Investigation'),
       navDashStyle:navBtn(s.view==='dashboard'), navNewStyle:navBtn(s.view==='new'),
-      navRecent, investigations, stats, examples, targetOpen:s.targetOpen, live:s.live, liveActive,
+      navRecent, investigations, stats, examples, targetOpen:s.targetOpen, live:s.live, agent:s.agent, liveActive,
       urlInput:s.urlInput, inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
       runLabel: s.running?'Running…':'Run remaining checks',
       verdictOptions, verdictConfirmed, verdictUnconfirmed:!verdictConfirmed, confirmedBy:this.USER.name,
@@ -655,7 +655,13 @@ class Studio extends React.Component {
     return (
       <div className="qa-fade" style={S("max-width:680px; margin:0 auto; padding:56px 32px;")}>
         <h1 style={S("color:var(--text); font-size:24px; margin:0 0 6px;")}>New investigation</h1>
-        <p style={S("color:var(--text3); font-size:14px; margin:0 0 28px;")}>Paste a GitHub issue and Fleet QA Studio reproduces it against the live deployed build, reads the source at the deployed revision, and gathers evidence for a verdict.</p>
+        <p style={S("color:var(--text3); font-size:14px; margin:0 0 14px;")}>Paste a GitHub issue and Fleet QA Studio reproduces it against the live deployed build, reads the source at the deployed revision, and gathers evidence for a verdict.</p>
+        {v.live && (
+          <div style={S("display:inline-flex; align-items:center; gap:7px; margin-bottom:24px; padding:5px 11px; border-radius:20px; font-size:11.5px; font-weight:600; background:var(--accent-tint); color:var(--accent);")}>
+            <span style={{width:'6px',height:'6px',borderRadius:'50%',background:'var(--accent)'}}/>
+            {v.agent ? 'AI agent — Claude drives the tools' : 'Heuristic engine — deterministic pipeline'}
+          </div>
+        )}
         <label style={S("display:block; color:var(--text); font-weight:600; font-size:13px; margin-bottom:8px;")}>GitHub issue URL</label>
         <div style={S("display:flex; gap:10px; margin-bottom:8px;")}>
           <div style={S("flex:1; display:flex; align-items:center; gap:10px; height:46px; padding:0 14px; background:var(--surface); border:1px solid var(--border); border-radius:8px;")}>

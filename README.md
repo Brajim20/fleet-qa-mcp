@@ -39,11 +39,25 @@ See **[ONBOARDING.md](ONBOARDING.md)** for full setup, per-user config, the huma
 | `browser_sample_frames` | `sample-frames` | per-frame sampler for timing/visual bugs |
 | `build_issue_url` | `issue` | **prefilled** GitHub issue URL (never submits) |
 
+## Investigations: AI agent or heuristic engine
+
+`make studio` runs full investigations end-to-end. Two engines, picked automatically:
+
+- **AI agent** (when `ANTHROPIC_API_KEY` is set): Claude reads the issue and drives the
+  read-only tools in a loop — calling the API, opening a real browser, grepping the
+  deployed source, checking the build — then proposes a verdict you confirm. It decides
+  *what* to investigate, the way a human QA engineer would.
+- **Heuristic engine** (no key, or on agent error): a deterministic pipeline that derives
+  the step inputs (API path, grep keyword, commit SHA) from the issue text with regex.
+
+Either way the tools are read-only, code is pinned to the deployed revision, and the
+verdict is human-confirmed. See [studio/README.md](studio/README.md).
+
 ## Design
 
 - **Per-user config**: instance URL + token resolved from each user's `~/.fleet/config`, so the committed `.mcp.json` carries no shared URL. Auto-refreshes the token on a 401 (with `FLEET_PASSWORD`).
 - **Deployed-rev pinning**: code tools default to the running build's revision — never analyze `main` by mistake.
-- **Safety**: read-only by default; writes require `confirm`; GitHub issues are prefilled URLs you review, never auto-posted.
+- **Safety**: read-only by default; writes require `confirm` (the AI agent is never given it); GitHub issues are prefilled URLs you review, never auto-posted.
 
 ## License
 

@@ -22,6 +22,18 @@ The instance + Fleet source repo are resolved exactly like the MCP/CLI front-end
 browser repro: `make qa-setup` then `make qa-auth`. Reads are free; live-instance
 writes and issue submission always require an explicit confirm — nothing is auto-posted.
 
+### Two engines (picked automatically)
+- **AI agent** — set `ANTHROPIC_API_KEY` in `.env` and Claude drives the tools: it reads
+  the issue and decides which API to call, which page to open, what to grep, and which
+  commit to build-check — a handful of well-chosen steps, then a proposed verdict. The New
+  investigation page shows an "AI agent" badge; each tool call becomes a timeline step.
+- **Heuristic engine** — with no key (or if the agent errors), a deterministic pipeline
+  derives the step inputs from the issue text with regex. Same tools, same safety.
+
+The agent is only ever given the **read-only** tools (its `fleet_request` is GET-only and
+never receives `confirm`), so the "reads free, writes gated" invariant holds even when an
+autonomous agent is in the loop.
+
 ### How the engine maps to the UI
 | Timeline step | Backend function (`internal/qa`) |
 |---|---|

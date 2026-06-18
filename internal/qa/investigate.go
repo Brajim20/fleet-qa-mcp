@@ -11,6 +11,7 @@ import (
 
 	"github.com/Brajim20/fleet-qa-mcp/internal/ghissue"
 	"github.com/Brajim20/fleet-qa-mcp/internal/gitcode"
+	"github.com/Brajim20/fleet-qa-mcp/internal/llm"
 )
 
 // StepResult is one row of the investigation evidence timeline. The shape
@@ -45,15 +46,35 @@ type Report struct {
 	Error     string       `json:"error,omitempty"`
 }
 
-// Investigate runs the deterministic evidence pipeline for one issue against the
-// live deployed build and returns a structured report. Each step captures its
-// own error into the report rather than aborting — a failed browser repro
-// shouldn't blow away the API evidence that already succeeded.
+// Investigate runs an investigation for one issue against the live deployed
+// build and returns a structured report. When an Anthropic API key is set, it
+// runs the agentic path (Claude drives the tools like a human QA); otherwise —
+// or if the agent errors — it falls back to the deterministic heuristic engine.
 //
 // shotDir is where browser screenshots are written; shotURLBase is the URL
 // prefix the HTTP layer serves them under (e.g. "/shots"). Pass "" for both to
 // skip screenshots.
 func (a *App) Investigate(ref, shotDir, shotURLBase string) *Report {
+	if c, ok := llm.NewFromEnv(); ok {
+		if rep, err := a.investigateAgentic(c, ref, shotDir, shotURLBase); err == nil {
+			return rep
+		} else {
+			// Agent failed (bad key, rate limit, no verdict) — degrade to the
+			// deterministic engine rather than returning nothing.
+			rep = a.investigateHeuristic(ref, shotDir, shotURLBase)
+			rep.Error = strings.TrimSpace("agent fell back to heuristic engine: " + err.Error())
+			return rep
+		}
+	}
+	return a.investigateHeuristic(ref, shotDir, shotURLBase)
+}
+
+// investigateHeuristic runs the deterministic evidence pipeline: it derives the
+// step inputs (API path, grep keyword, commit SHA) from the issue text with
+// regex heuristics. Each step captures its own error into the report rather
+// than aborting — a failed browser repro shouldn't blow away the API evidence
+// that already succeeded.
+func (a *App) investigateHeuristic(ref, shotDir, shotURLBase string) *Report {
 	num := parseIssueNumber(ref)
 	rep := &Report{Number: num, Status: "In progress", Instance: hostOf(a.Inst.URL)}
 
