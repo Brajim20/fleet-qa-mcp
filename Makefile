@@ -1,18 +1,22 @@
-.PHONY: qa-mcp qa-setup qa-auth tidy clean
+.PHONY: help qa-mcp qa-setup qa-auth test vet tidy clean
 
-# Build the MCP server binary.
-qa-mcp: tidy
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
+
+qa-mcp: tidy ## Build the MCP/CLI binary
 	go build -o build/fleet-qa-mcp ./cmd/fleet-qa-mcp
 
-# One-time: resolve deps + download the Playwright Chromium driver.
-qa-setup: tidy
+qa-setup: tidy ## One-time: deps + download Playwright Chromium
 	go run ./cmd/fleet-qa-mcp --install-browsers
 
-# Log in and write a reusable browser session (storageState), keyed per-host.
-# Reads instance URL from ~/.fleet/config (or FLEET_URL). Prompts for creds
-# if no token is available.
-qa-auth: qa-mcp
+qa-auth: qa-mcp ## Write a reusable browser session from the admin token
 	./build/fleet-qa-mcp --auth
+
+test: ## Run unit tests
+	go test ./...
+
+vet: ## go vet
+	go vet ./...
 
 tidy:
 	go mod tidy

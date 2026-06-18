@@ -27,10 +27,17 @@ import (
 	"github.com/spf13/pflag"
 )
 
+const version = "0.1.0"
+
 func main() {
 	// Load .env (best-effort) so FLEET_REPO/FLEET_CONTEXT/overrides work
 	// regardless of how the MCP client spawns the process.
 	_ = godotenv.Load()
+
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "version") {
+		fmt.Println("fleet-qa-mcp", version)
+		return
+	}
 
 	// CLI mode if the first arg is a known subcommand.
 	if len(os.Args) > 1 && isSubcommand(os.Args[1]) {
@@ -93,7 +100,7 @@ func runServer() {
 
 	a, err := buildApp(*ctxName)
 	must(err)
-	s := server.NewMCPServer("fleet-qa", "0.1.0")
+	s := server.NewMCPServer("fleet-qa", version)
 	registerMCP(s, a)
 	must(server.ServeStdio(s))
 }
