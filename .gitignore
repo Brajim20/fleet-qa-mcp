@@ -6,7 +6,10 @@
 *.env
 !.env.example
 /.auth/
-/.fleet-src/        # self-provisioned Fleet checkout (managed clone)
+# self-provisioned Fleet checkout (managed clone)
+/.fleet-src/
+# browser screenshots captured during live investigations
+/studio/.shots/
 
 # OS / editor
 .DS_Store

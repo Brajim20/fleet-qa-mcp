@@ -102,16 +102,75 @@ class Studio extends React.Component {
     urlInput: 'https://github.com/fleetdm/fleet/issues/47712', toast: null, running: false, runTick: 0,
     // Resolved target instance (version/rev filled live from the instance when reachable).
     inst: { version: '4.87.0-rc.2606171916', rev: '9c17a71c43', tier: 'Premium', built: 'Jun 17, 2026 19:16 UTC', connected: true },
+    // LIVE mode — set true when served by the fleet-qa-mcp `serve` backend.
+    // In live mode, investigations actually run against the deployed build.
+    live: false, liveList: [], liveReports: {}, busy: false, busyMsg: '',
+    liveVerdict: {}, liveConfirmed: {},
   };
 
   componentDidMount(){
-    // Best-effort live read of the resolved instance's deployed build.
-    // CORS/unreachable → silently keep the configured defaults.
+    // Is the fleet-qa-mcp backend serving us? If so, switch to LIVE mode and
+    // drive real investigations. If not (e.g. GitHub Pages), stay in demo mode
+    // with the mock data, and best-effort read the instance version directly.
+    fetch('/api/health').then(r => r.ok ? r.json() : null).then(h => {
+      if (h && h.ok) {
+        this.setState(s => ({ live: true, inst: { ...s.inst,
+          version: h.version || s.inst.version, rev: (h.rev||s.inst.rev).slice(0,10),
+          tier: (h.tier ? h.tier[0].toUpperCase()+h.tier.slice(1) : s.inst.tier),
+          connected: !!h.connected, built: '' } }));
+        this.loadLiveList();
+      } else {
+        this.demoVersionProbe();
+      }
+    }).catch(() => this.demoVersionProbe());
+  }
+
+  demoVersionProbe(){
     fetch(INSTANCE_URL + '/api/latest/fleet/version', { headers: { 'ngrok-skip-browser-warning': 'true' } })
       .then(r => r.ok ? r.json() : null)
       .then(v => { if (v && v.version) this.setState(s => ({ inst: { ...s.inst, version: v.version, rev: (v.revision || s.inst.rev).slice(0,10), connected: true } })); })
       .catch(() => {});
   }
+
+  // ---- LIVE backend helpers ----
+  loadLiveList(){
+    fetch('/api/investigations').then(r=>r.json())
+      .then(d => this.setState({ liveList: d.investigations || [] })).catch(()=>{});
+  }
+  runLive = (issueRef) => {
+    const m = (issueRef||'').match(/(\d{3,7})/);
+    const label = m ? '#'+m[1] : 'issue';
+    this.setState({ busy:true, busyMsg:'Investigating '+label+' against '+INSTANCE_HOST+' — fetching issue, hitting the live API, driving Chromium, grepping the deployed source…' });
+    fetch('/api/investigate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ issue: issueRef }) })
+      .then(r=>r.json())
+      .then(rep => {
+        if (rep.error && (!rep.steps || !rep.steps.length)) { this.setState({ busy:false, toast:'Investigation failed: '+rep.error }); this.flashToast(); return; }
+        this.setState(s => ({ busy:false, view:'detail', activeId:rep.number, modal:null, targetOpen:false,
+          liveReports:{...s.liveReports, [rep.number]:rep},
+          openSteps: rep.steps.reduce((o,_,i)=>(o['live-'+i]=i<2, o), {}) }));
+        this.loadLiveList();
+      })
+      .catch(e => { this.setState({ busy:false, toast:'Investigation error: '+e.message }); this.flashToast(); });
+  };
+  openLive = (n) => {
+    const cached = this.state.liveReports[n];
+    if (cached) { this.showLive(cached); return; }
+    fetch('/api/report?number='+n).then(r => r.ok ? r.json() : null).then(rep => {
+      if (rep) { this.setState(s=>({liveReports:{...s.liveReports,[n]:rep}})); this.showLive(rep); }
+      else { this.runLive(String(n)); }   // not run this session → run it now
+    }).catch(()=>this.runLive(String(n)));
+  };
+  showLive(rep){
+    this.setState({ view:'detail', activeId:rep.number, modal:null, targetOpen:false,
+      openSteps: rep.steps.reduce((o,_,i)=>(o['live-'+i]=true, o), {}) });
+  }
+  selectVerdictLive = (n, v) => this.setState(s => ({ liveVerdict:{...s.liveVerdict,[n]:v}, liveConfirmed:{...s.liveConfirmed,[n]:false} }));
+  confirmVerdictLive = (n) => {
+    const v = this.state.liveVerdict[n] || (this.state.liveReports[n]||{}).status;
+    fetch('/api/verdict', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ number:n, verdict:v }) }).catch(()=>{});
+    this.setState(s => ({ liveConfirmed:{...s.liveConfirmed,[n]:true}, toast:'Verdict confirmed: '+v }));
+    this.flashToast(); this.loadLiveList();
+  };
 
   investigations = [
     { number:47712, title:'Self-service: editing software on a team with no categories errors the Categories picker',
@@ -152,12 +211,14 @@ class Studio extends React.Component {
   stop = (e) => e.stopPropagation();
 
   openInv = (n) => {
+    if (this.state.live) { this.openLive(n); return; }
     const inv = this.invByNumber(n); const light = inv.kindSet === 'light';
     this.setState({ view:'detail', activeId:n, targetOpen:false, modal:null, verdict:inv.verdict,
       openSteps: light ? {issue:true} : {issue:true,reproduce:true,rootcause:true,buildcheck:true},
       running:false, runTick: light ? 2 : 99 });
   };
   runFromInput = () => {
+    if (this.state.live) { this.runLive(this.state.urlInput); return; }
     const m = (this.state.urlInput||'').match(/(\d{4,6})/);
     const n = m ? parseInt(m[1],10) : 47712;
     this.openInv(this.invByNumber(n) ? n : 47712);
@@ -175,7 +236,13 @@ class Studio extends React.Component {
     setTimeout(()=>this.setState({copied:false}),1600);
   };
   openDraft = () => this.setState({ modal:'draft' });
-  confirmSubmit = () => { this.setState({ modal:null, toast:'Opened prefilled issue in GitHub (nothing posted)' }); this.flashToast(); };
+  confirmSubmit = () => {
+    if (this.state.live) {
+      const rep = this.state.liveReports[this.state.activeId];
+      if (rep && rep.draftUrl) window.open(rep.draftUrl, '_blank', 'noopener');
+    }
+    this.setState({ modal:null, toast:'Opened prefilled issue in GitHub (nothing posted)' }); this.flashToast();
+  };
   flashToast(){ clearTimeout(this._tt); this._tt = setTimeout(()=>this.setState({toast:null}),2200); }
   runRemaining = () => {
     if (this.state.running) return;
@@ -355,18 +422,28 @@ class Studio extends React.Component {
     };
   }
 
+  // In live mode, map server-side investigation summaries into the same row
+  // shape the dashboard/recent list already render.
+  liveSource(){
+    return (this.state.liveList||[]).map(r => ({
+      number:r.number, title:r.title, status:(this.state.liveVerdict[r.number]||r.status||'In progress'),
+      area:r.group||'', reporter:r.reporter||'—', reportedVersion:'', updated:r.updatedAt||'', evidenceCount:r.steps||0,
+    }));
+  }
   renderVals(){
     const s = this.state;
     const isDark = s.theme === 'dark';
     const navBtn = (active) => ({ display:'flex',alignItems:'center',gap:'10px',width:'100%',textAlign:'left',height:'38px',padding:'0 12px',borderRadius:'6px',border:'none',fontSize:'13.5px',fontWeight:600, background:active?'var(--accent-tint)':'transparent', color:active?'var(--accent)':'var(--text2)' });
     const chipFor = (st) => this.CHIP[st] || this.CHIP['In progress'];
-    const investigations = this.investigations.map(i => { const c=chipFor(i.status); return { ...i, chipBg:c.bg, chipFg:c.fg, evidenceCount:7, onOpen:()=>this.openInv(i.number), hoverIn:(e)=>{e.currentTarget.style.background='var(--surface2)';}, hoverOut:(e)=>{e.currentTarget.style.background='transparent';} }; });
-    const navRecent = this.investigations.slice(0,5).map(i => { const c=chipFor(i.status); const active=s.view==='detail'&&s.activeId===i.number; return { number:i.number, dot:c.fg, shortColor:c.fg, shortStatus:this.SHORT[i.status]||i.status, onOpen:()=>this.openInv(i.number), navStyle:{display:'flex',alignItems:'center',gap:'8px',width:'100%',textAlign:'left',height:'32px',padding:'0 8px',borderRadius:'6px',border:'none',background:active?'var(--surface2)':'transparent',color:active?'var(--text)':'var(--text2)',fontSize:'12.5px',fontWeight:600} }; });
+    const baseInvs = s.live ? this.liveSource() : this.investigations;
+    const evCount = (i) => s.live ? (i.evidenceCount||0) : 7;
+    const investigations = baseInvs.map(i => { const c=chipFor(i.status); return { ...i, chipBg:c.bg, chipFg:c.fg, evidenceCount:evCount(i), onOpen:()=>this.openInv(i.number), hoverIn:(e)=>{e.currentTarget.style.background='var(--surface2)';}, hoverOut:(e)=>{e.currentTarget.style.background='transparent';} }; });
+    const navRecent = baseInvs.slice(0,5).map(i => { const c=chipFor(i.status); const active=s.view==='detail'&&s.activeId===i.number; return { number:i.number, dot:c.fg, shortColor:c.fg, shortStatus:this.SHORT[i.status]||i.status, onOpen:()=>this.openInv(i.number), navStyle:{display:'flex',alignItems:'center',gap:'8px',width:'100%',textAlign:'left',height:'32px',padding:'0 8px',borderRadius:'6px',border:'none',background:active?'var(--surface2)':'transparent',color:active?'var(--text)':'var(--text2)',fontSize:'12.5px',fontWeight:600} }; });
     const stats = [
-      { value:this.investigations.filter(i=>i.status==='In progress').length, label:'In progress', color:'#6a67fe' },
-      { value:this.investigations.filter(i=>i.status==='Confirmed bug').length, label:'Confirmed bugs', color:'#ff5c83' },
-      { value:this.investigations.filter(i=>i.status==='Fixed').length, label:'Verified fixed', color:'#3db67b' },
-      { value:this.investigations.filter(i=>i.status==='Not a bug'||i.status==='Cannot reproduce').length, label:'Closed / no-repro', color:'#8b8fa2' },
+      { value:baseInvs.filter(i=>i.status==='In progress').length, label:'In progress', color:'#6a67fe' },
+      { value:baseInvs.filter(i=>i.status==='Confirmed bug').length, label:'Confirmed bugs', color:'#ff5c83' },
+      { value:baseInvs.filter(i=>i.status==='Fixed').length, label:'Verified fixed', color:'#3db67b' },
+      { value:baseInvs.filter(i=>i.status==='Not a bug'||i.status==='Cannot reproduce').length, label:'Closed / no-repro', color:'#8b8fa2' },
     ];
     const examples = [
       { number:47712, title:'Self-service categories picker errors on empty teams', hint:'verdict ends up FIXED — code diff + build check', onRun:()=>this.openInv(47712) },
@@ -402,18 +479,22 @@ class Studio extends React.Component {
     const verdictConfirmed = inv ? (s.confirmed[inv.number]!==undefined ? s.confirmed[inv.number] : inv.confirmed) : false;
     const selected = s.verdict || (inv && inv.verdict);
     const verdictOptions = this.VERDICTS.map(v => { const c=chipFor(v); const sel=v===selected; return { label:v, color:c.fg, ring:sel?c.fg:'var(--border)', selected:sel, isProposed:inv&&v===inv.verdict, onSelect:()=>this.selectVerdict(v), optStyle:{display:'flex',alignItems:'center',gap:'10px',width:'100%',textAlign:'left',padding:'10px 12px',borderRadius:'7px',cursor:'pointer',background:sel?'var(--accent-tint)':'var(--well)',border:sel?'1px solid var(--accent)':'1px solid var(--border)'} }; });
-    const d = this.draft();
+    const liveActive = s.live ? (s.liveReports[s.activeId] || null) : null;
+    const d = liveActive
+      ? { title:'[QA] '+liveActive.title, body:liveActive.qaComment, labels:(liveActive.labels||[]).concat(['qa-verified']) }
+      : this.draft();
+    const crumbNum = liveActive ? liveActive.number : (inv ? inv.number : null);
     return {
       themeClass:isDark?'':'theme-light', isDark, isLight:!isDark,
       isDashboard:s.view==='dashboard', isNew:s.view==='new', isDetail:s.view==='detail',
-      crumb: s.view==='dashboard'?'Investigations':s.view==='new'?'New investigation':(inv?'#'+inv.number:'Investigation'),
+      crumb: s.view==='dashboard'?'Investigations':s.view==='new'?'New investigation':(crumbNum?'#'+crumbNum:'Investigation'),
       navDashStyle:navBtn(s.view==='dashboard'), navNewStyle:navBtn(s.view==='new'),
-      navRecent, investigations, stats, examples, targetOpen:s.targetOpen,
+      navRecent, investigations, stats, examples, targetOpen:s.targetOpen, live:s.live, liveActive,
       urlInput:s.urlInput, inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
       runLabel: s.running?'Running…':'Run remaining checks',
       verdictOptions, verdictConfirmed, verdictUnconfirmed:!verdictConfirmed, confirmedBy:this.USER.name,
       qaComment:this.qaComment(), copyLabel:s.copied?'Copied':'Copy',
-      draftOpen:s.modal==='draft', draftTitle:d.title, draftBody:d.body, draftLabels:d.labels, toast:s.toast, inst:s.inst,
+      draftOpen:s.modal==='draft', draftUrl:liveActive?liveActive.draftUrl:'', draftTitle:d.title, draftBody:d.body, draftLabels:d.labels, toast:s.toast, inst:s.inst,
     };
   }
 
@@ -502,11 +583,22 @@ class Studio extends React.Component {
           <main style={S("flex:1; overflow:auto;")}>
             {v.isDashboard && this.renderDashboard(v)}
             {v.isNew && this.renderNew(v)}
-            {v.isDetail && this.renderDetail(v)}
+            {v.isDetail && (v.liveActive ? this.renderLiveDetail(v.liveActive, v) : this.renderDetail(v))}
           </main>
         </div>
 
         {v.draftOpen && this.renderDraft(v)}
+        {this.state.busy && (
+          <div className="qa-fade" style={S("position:fixed; inset:0; background:rgba(15,18,38,.62); display:flex; align-items:center; justify-content:center; z-index:90; padding:32px;")}>
+            <div style={S("max-width:440px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:26px 28px; box-shadow:0 12px 40px rgba(0,0,0,.4);")}>
+              <div style={S("display:flex; align-items:center; gap:12px; margin-bottom:12px;")}>
+                <span className="qa-spin" style={{width:'20px',height:'20px',border:'2.5px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',display:'block',flex:'none'}}/>
+                <span style={S("color:var(--text); font-weight:600; font-size:15px;")}>Running investigation…</span>
+              </div>
+              <p style={S("color:var(--text3); font-size:12.5px; line-height:1.6; margin:0;")}>{this.state.busyMsg}</p>
+            </div>
+          </div>
+        )}
         {v.toast && <div className="qa-fade" style={S("position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:11px 18px; border-radius:8px; font-size:13px; font-weight:600; z-index:80; box-shadow:0 8px 24px rgba(0,0,0,.3);")}>{v.toast}</div>}
       </div>
     );
@@ -536,6 +628,11 @@ class Studio extends React.Component {
           <div style={S("display:grid; grid-template-columns:62px minmax(0,1fr) 150px 86px 74px; gap:16px; padding:12px 20px; border-bottom:1px solid var(--border); color:var(--text3); font-size:11px; letter-spacing:.05em; text-transform:uppercase;")}>
             <span>Issue</span><span>Title</span><span>Status</span><span>Evidence</span><span style={{textAlign:'right'}}>Updated</span>
           </div>
+          {v.live && v.investigations.length===0 && (
+            <div style={S("padding:36px 20px; text-align:center; color:var(--text3); font-size:13px;")}>
+              No investigations yet this session. <button onClick={this.goNew} style={S("background:transparent; border:none; color:var(--accent); font-weight:600; font-size:13px; padding:0; cursor:pointer;")}>Start one →</button>
+            </div>
+          )}
           {v.investigations.map(item=>(
             <button key={item.number} onClick={item.onOpen} onMouseEnter={item.hoverIn} onMouseLeave={item.hoverOut}
               style={S("display:grid; grid-template-columns:62px minmax(0,1fr) 150px 86px 74px; gap:16px; align-items:center; width:100%; text-align:left; padding:14px 20px; background:transparent; border:none; border-bottom:1px solid var(--border); color:var(--text2);")}>
@@ -745,6 +842,97 @@ class Studio extends React.Component {
               </div>
               <textarea readOnly value={v.qaComment} style={S("width:100%; height:148px; resize:none; background:var(--well); border:1px solid var(--border); border-radius:6px; padding:11px; color:var(--text2); font-size:12px; line-height:1.6; outline:none;")}/>
               <button onClick={this.openDraft} style={S("width:100%; height:40px; margin-top:12px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text); font-weight:600; font-size:13px; display:flex; align-items:center; justify-content:center; gap:8px;")}><Svg w={15} h={15} fill="currentColor" stroke="none" d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49v-1.7c-2.78.62-3.37-1.21-3.37-1.21-.46-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.36-2.22-.26-4.55-1.14-4.55-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.27 2.75 1.05a9.4 9.4 0 0 1 5 0c1.91-1.32 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9v2.81c0 .27.18.6.69.49A10.26 10.26 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/>Draft GitHub issue</button>
+            </div>
+            <div style={S("margin-top:14px; padding:13px 15px; background:var(--surface); border:1px solid var(--border); border-radius:8px; display:flex; gap:9px;")}><Svg w={15} h={15} stroke="var(--text3)" style={S("flex:none; margin-top:1px;")}><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></Svg><span style={S("font-size:11.5px; color:var(--text3); line-height:1.5;")}>Reads are free. Live-instance writes and issue submission always require an explicit confirm.</span></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  renderLiveDetail(rep, v){
+    const s = this.state;
+    const n = rep.number;
+    const stColor = (st)=>({ok:'var(--success)',warn:'var(--warning)',error:'var(--danger)',info:'var(--text3)'}[st]||'var(--accent)');
+    const status = s.liveVerdict[n] || rep.status || 'In progress';
+    const chip = this.CHIP[status] || this.CHIP['In progress'];
+    const confirmed = !!s.liveConfirmed[n];
+    const selected = s.liveVerdict[n] || rep.status;
+    return (
+      <div className="qa-fade" style={S("max-width:1080px; margin:0 auto; padding:28px 32px 80px;")}>
+        <button onClick={this.goDashboard} style={S("display:inline-flex; align-items:center; gap:6px; background:transparent; border:none; color:var(--text3); font-size:12.5px; margin-bottom:14px; padding:0;")}><Svg w={15} h={15} d="m15 18-6-6 6-6"/>All investigations</button>
+        <div style={S("display:flex; align-items:flex-start; gap:16px; margin-bottom:6px;")}>
+          <h1 style={S("color:var(--text); font-size:22px; line-height:1.3; flex:1; margin:0;")}>{rep.title}</h1>
+          <span style={{display:'inline-flex',alignItems:'center',gap:'7px',padding:'6px 14px',borderRadius:'20px',fontSize:'13px',fontWeight:600,background:chip.bg,color:chip.fg,flex:'none',whiteSpace:'nowrap'}}><span style={{width:'7px',height:'7px',borderRadius:'50%',background:chip.fg}}/>{status}</span>
+        </div>
+        <div style={S("display:flex; align-items:center; gap:14px; color:var(--text3); font-size:12.5px; margin-bottom:24px; flex-wrap:wrap;")}>
+          <a href={rep.issueUrl||'#'} target="_blank" rel="noopener" style={S("font-family:var(--font-mono); color:var(--accent); font-size:12.5px;")}>fleetdm/fleet#{n}</a>
+          <span>·</span><span>{rep.group||'—'}</span><span>·</span><span>reported by {rep.reporter||'—'}</span><span>·</span>
+          <span style={S("display:inline-flex; align-items:center; gap:5px; color:var(--success); font-weight:600;")}><span style={{width:'6px',height:'6px',borderRadius:'50%',background:'var(--success)'}}/>live · {rep.instance} · rev {(rep.rev||'').slice(0,8)}</span>
+        </div>
+        <div style={S("display:grid; grid-template-columns:1fr 320px; gap:28px; align-items:start;")}>
+          {/* TIMELINE */}
+          <div>
+            <div style={S("display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;")}>
+              <span style={S("color:var(--text); font-weight:600; font-size:15px;")}>Evidence timeline</span>
+              <button onClick={()=>this.runLive(String(n))} style={S("height:30px; padding:0 12px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text2); font-size:12px;")}>Re-run</button>
+            </div>
+            <div style={S("display:flex; flex-direction:column;")}>
+              {rep.steps.map((step,i)=>{
+                const open = !!s.openSteps['live-'+i]; const col = stColor(step.status);
+                return (
+                <div key={i} style={S("display:flex; gap:14px;")}>
+                  <div style={S("display:flex; flex-direction:column; align-items:center; flex:none; width:30px;")}>
+                    <div style={{width:'28px',height:'28px',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',flex:'none',border:'2px solid',borderColor:col,background:step.status==='ok'?col:'var(--surface)',color:step.status==='ok'?'#fff':col}}>
+                      {step.status==='ok' ? <Svg w={14} h={14} sw={3} d="M20 6 9 17l-5-5"/> : (step.status==='info' ? <span style={{width:'7px',height:'7px',borderRadius:'50%',background:col}}/> : <span style={{fontSize:'13px',fontWeight:700}}>!</span>)}
+                    </div>
+                    <div style={{width:'2px',flex:1,minHeight:'8px',background:'var(--border)',marginTop:'2px',marginBottom:'2px'}}/>
+                  </div>
+                  <div style={S("flex:1; min-width:0; margin-bottom:12px;")}>
+                    <button onClick={()=>this.toggleStep('live-'+i)} style={{...S("width:100%; display:flex; align-items:center; gap:12px; text-align:left; background:var(--surface); border:1px solid var(--border); padding:13px 16px; color:var(--text2);"), borderRadius: open ? '8px 8px 0 0' : '8px'}}>
+                      <span style={S("color:var(--text3); font-family:var(--font-mono); font-size:11px; flex:none;")}>{step.tool}</span>
+                      <span style={S("color:var(--text); font-weight:600; font-size:13.5px; flex:none;")}>{step.title}</span>
+                      <span style={S("color:var(--text3); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0;")}>— {step.summary}</span>
+                      <Svg w={16} h={16} style={{color:'var(--text3)',flex:'none',transition:'transform .2s',transform:open?'rotate(180deg)':'none'}} d="m6 9 6 6 6-6"/>
+                    </button>
+                    {open && (
+                      <div className="qa-fade" style={S("border:1px solid var(--border); border-top:none; border-radius:0 0 8px 8px; margin-top:-1px; padding:16px; background:var(--surface);")}>
+                        {step.detail
+                          ? <pre style={S("margin:0; background:var(--code-bg); color:var(--code-fg); padding:14px; border-radius:6px; font-size:12px; line-height:1.6; overflow:auto; white-space:pre-wrap; max-height:340px;")}>{step.detail}</pre>
+                          : <div style={S("color:var(--text3); font-size:12.5px;")}>{step.summary}</div>}
+                        {step.image && <img src={step.image} alt="repro screenshot" style={{display:'block',width:'100%',marginTop:'12px',borderRadius:'6px',border:'1px solid var(--border)'}}/>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );})}
+            </div>
+          </div>
+          {/* VERDICT PANEL */}
+          <div style={S("position:sticky; top:0;")}>
+            <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:18px;")}>
+              <div style={S("display:flex; align-items:center; gap:8px; margin-bottom:4px;")}>
+                <span style={S("color:var(--text); font-weight:600; font-size:15px;")}>Verdict</span>
+                <span style={S("margin-left:auto; font-size:10.5px; color:var(--text3); display:inline-flex; align-items:center; gap:4px;")}><Svg w={12} h={12} d="M16 7a4 4 0 1 0-8 0M3 21h18M5 21V11h14v10"/>You decide</span>
+              </div>
+              <p style={S("color:var(--text3); font-size:12px; line-height:1.5; margin:0 0 14px;")}>The engine gathered the evidence above against the live build. You own the call — confirm it below.</p>
+              <div style={S("display:flex; flex-direction:column; gap:7px; margin-bottom:16px;")}>
+                {this.VERDICTS.map((opt,i)=>{ const c=this.CHIP[opt]; const sel=opt===selected; return (
+                  <button key={i} onClick={()=>this.selectVerdictLive(n,opt)} style={{display:'flex',alignItems:'center',gap:'10px',width:'100%',textAlign:'left',padding:'10px 12px',borderRadius:'7px',cursor:'pointer',background:sel?'var(--accent-tint)':'var(--well)',border:sel?'1px solid var(--accent)':'1px solid var(--border)'}}>
+                    <span style={{width:'14px',height:'14px',borderRadius:'50%',flex:'none',border:'2px solid '+(sel?c.fg:'var(--border)'),display:'flex',alignItems:'center',justifyContent:'center'}}>{sel && <span style={{width:'7px',height:'7px',borderRadius:'50%',background:c.fg}}/>}</span>
+                    <span style={{fontWeight:600,fontSize:'13px',color:'var(--text)'}}>{opt}</span>
+                  </button>
+                );})}
+              </div>
+              {confirmed
+                ? <div style={S("display:flex; align-items:center; gap:8px; padding:10px 12px; background:rgba(61,182,123,.10); border:1px solid rgba(61,182,123,.3); border-radius:6px; color:var(--success); font-size:12.5px; font-weight:600; margin-bottom:14px;")}><Svg w={15} h={15} sw={2.4} d="M20 6 9 17l-5-5"/>Confirmed by {this.USER.name}</div>
+                : <button onClick={()=>this.confirmVerdictLive(n)} style={S("width:100%; height:40px; background:var(--accent); color:#fff; border:none; border-radius:6px; font-weight:600; font-size:13.5px; margin-bottom:14px;")}>Confirm verdict</button>}
+              <div style={S("color:var(--text3); font-size:11px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:8px; display:flex; align-items:center; justify-content:space-between;")}>
+                <span>QA comment</span>
+                <button onClick={()=>{ try{navigator.clipboard&&navigator.clipboard.writeText(rep.qaComment);}catch(e){} this.setState({toast:'QA comment copied'}); this.flashToast(); }} style={S("background:transparent; border:none; color:var(--accent); font-size:11px; font-weight:600; display:inline-flex; align-items:center; gap:4px; padding:0;")}><Svg w={12} h={12}><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></Svg>Copy</button>
+              </div>
+              <textarea readOnly value={rep.qaComment} style={S("width:100%; height:148px; resize:none; background:var(--well); border:1px solid var(--border); border-radius:6px; padding:11px; color:var(--text2); font-size:12px; line-height:1.6; outline:none;")}/>
+              <button onClick={this.openDraft} style={S("width:100%; height:40px; margin-top:12px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text); font-weight:600; font-size:13px; display:flex; align-items:center; justify-content:center; gap:8px;")}>Draft GitHub issue</button>
             </div>
             <div style={S("margin-top:14px; padding:13px 15px; background:var(--surface); border:1px solid var(--border); border-radius:8px; display:flex; gap:9px;")}><Svg w={15} h={15} stroke="var(--text3)" style={S("flex:none; margin-top:1px;")}><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></Svg><span style={S("font-size:11.5px; color:var(--text3); line-height:1.5;")}>Reads are free. Live-instance writes and issue submission always require an explicit confirm.</span></div>
           </div>

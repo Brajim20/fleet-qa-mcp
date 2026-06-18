@@ -1,8 +1,9 @@
 # fleet-qa-mcp
 
-A QA toolkit for [Fleet](https://github.com/fleetdm/fleet) with **two front-ends over one
-shared core**: an **MCP server** (for Claude Code / Cursor / VS Code) and a **deterministic
-CLI** (for scripting / CI). It reproduces issues, root-causes in the *deployed* code,
+A QA toolkit for [Fleet](https://github.com/fleetdm/fleet) with **three front-ends over one
+shared core**: an **MCP server** (for Claude Code / Cursor / VS Code), a **deterministic
+CLI** (for scripting / CI), and **Fleet QA Studio** — a web app that runs full
+investigations end-to-end. It reproduces issues, root-causes in the *deployed* code,
 checks whether a PR/cherry-pick is in the running build, drives a real browser, and drafts
 prefilled GitHub issues — the manual QA workflow, packaged so anyone can reuse it.
 
@@ -17,9 +18,10 @@ export FLEET_REPO=~/path/to/fleet   # your Fleet checkout (for code tools)
 make qa-auth                   # reusable browser session from your admin token
 ```
 
-Then either:
+Then any of:
 - **MCP**: open the repo in Claude Code (auto-detects `.mcp.json`) / Cursor / VS Code, enable `fleet-qa`. Run the `whoami` tool first.
 - **CLI**: `./build/fleet-qa-mcp help`
+- **Web app (Fleet QA Studio)**: `make studio` → <http://127.0.0.1:8799>. Paste a GitHub issue and it runs the whole investigation against your live build. See [studio/README.md](studio/README.md).
 
 See **[ONBOARDING.md](ONBOARDING.md)** for full setup, per-user config, the human-in-the-loop steps, and limits.
 

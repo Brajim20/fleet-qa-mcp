@@ -14,11 +14,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Brajim20/fleet-qa-mcp/internal/browser"
 	"github.com/Brajim20/fleet-qa-mcp/internal/fleetcfg"
+	"github.com/Brajim20/fleet-qa-mcp/internal/httpapi"
 	"github.com/Brajim20/fleet-qa-mcp/internal/qa"
 
 	"github.com/joho/godotenv"
@@ -39,12 +42,53 @@ func main() {
 		return
 	}
 
+	// HTTP/Studio mode: serve the UI + JSON API.
+	if len(os.Args) > 1 && os.Args[1] == "serve" {
+		runHTTP(os.Args[2:])
+		return
+	}
+
 	// CLI mode if the first arg is a known subcommand.
 	if len(os.Args) > 1 && isSubcommand(os.Args[1]) {
 		runCLI(os.Args[1], os.Args[2:])
 		return
 	}
 	runServer()
+}
+
+// ---------------- HTTP / Studio mode ----------------
+
+func runHTTP(args []string) {
+	fs := pflag.NewFlagSet("serve", pflag.ExitOnError)
+	ctxName := fs.String("context", ctxFromEnv(), "~/.fleet/config context")
+	addr := fs.String("addr", "127.0.0.1:8799", "listen address")
+	studio := fs.String("studio", defaultStudioDir(), "directory containing the Studio index.html")
+	_ = fs.Parse(args)
+
+	a, err := buildApp(*ctxName)
+	must(err)
+
+	srv := httpapi.New(a, *studio)
+	fmt.Printf("Fleet QA Studio → http://%s\n", *addr)
+	fmt.Printf("  instance: %s (%s)\n  studio:   %s\n", a.Inst.URL, a.Inst.Source, *studio)
+	must(http.ListenAndServe(*addr, srv.Handler())) //nolint:gosec // localhost dev server
+}
+
+// defaultStudioDir locates ./studio relative to the binary or cwd, so `serve`
+// works whether run from the repo root or a `go run`/installed binary.
+func defaultStudioDir() string {
+	for _, c := range []string{"studio", "./studio"} {
+		if _, err := os.Stat(filepath.Join(c, "index.html")); err == nil {
+			return c
+		}
+	}
+	if exe, err := os.Executable(); err == nil {
+		c := filepath.Join(filepath.Dir(exe), "studio")
+		if _, err := os.Stat(filepath.Join(c, "index.html")); err == nil {
+			return c
+		}
+	}
+	return "studio"
 }
 
 // buildApp resolves the instance + Fleet source repo once.
