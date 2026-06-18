@@ -1,0 +1,12 @@
+# build output
+/build/
+
+# per-user secrets & runtime state — NEVER commit these
+.env
+*.env
+!.env.example
+/.auth/
+/.fleet-src/        # self-provisioned Fleet checkout (managed clone)
+
+# OS / editor
+.DS_Store

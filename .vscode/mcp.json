@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "fleet-qa": {
+      "type": "stdio",
+      "command": "./build/fleet-qa-mcp",
+      "args": ["--fleet-context", "default"],
+      "env": { "FLEET_REPO": "${env:FLEET_REPO}" }
+    }
+  }
+}

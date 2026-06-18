@@ -1,0 +1,12 @@
+{
+  "_comment": "Project-scoped MCP server. URL-free on purpose: the server resolves the instance URL + token from your own ~/.fleet/config (or FLEET_URL/FLEET_TOKEN env). Set FLEET_REPO to your Fleet checkout, or leave it for the server to self-provision a managed clone.",
+  "mcpServers": {
+    "fleet-qa": {
+      "command": "./build/fleet-qa-mcp",
+      "args": ["--fleet-context", "default"],
+      "env": {
+        "FLEET_REPO": "${FLEET_REPO}"
+      }
+    }
+  }
+}

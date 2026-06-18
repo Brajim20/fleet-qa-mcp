@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "fleet-qa": {
+      "command": "./build/fleet-qa-mcp",
+      "args": ["--fleet-context", "default"],
+      "env": { "FLEET_REPO": "${FLEET_REPO}" }
+    }
+  }
+}
