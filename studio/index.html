@@ -106,6 +106,8 @@ class Studio extends React.Component {
     // In live mode, investigations actually run against the deployed build.
     live: false, liveList: [], liveReports: {}, busy: false, busyMsg: '',
     liveVerdict: {}, liveConfirmed: {},
+    // QA queue (real open bugs) + generated-spec modal.
+    queue: [], queueLoading: false, queueLabel: 'bug', spec: null,
   };
 
   componentDidMount(){
@@ -164,6 +166,36 @@ class Studio extends React.Component {
     this.setState({ view:'detail', activeId:rep.number, modal:null, targetOpen:false,
       openSteps: rep.steps.reduce((o,_,i)=>(o['live-'+i]=true, o), {}) });
   }
+  // ---- QA queue ----
+  goQueue = () => { this.setState({ view:'queue', targetOpen:false, modal:null }); this.loadQueue(); };
+  loadQueue(){
+    this.setState({ queueLoading:true });
+    fetch('/api/queue?label='+encodeURIComponent(this.state.queueLabel))
+      .then(r=>r.json())
+      .then(d => this.setState({ queue:d.issues||[], queueLoading:false }))
+      .catch(()=>this.setState({ queueLoading:false, toast:'Could not load the queue' }));
+  }
+  // ---- generated Playwright spec ----
+  genSpec = (n) => {
+    fetch('/api/spec', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ number:n }) })
+      .then(r=>r.json())
+      .then(d => { if (d.error) { this.setState({toast:d.error}); this.flashToast(); return; } this.setState({ modal:'spec', spec:{...d, number:n, saving:false, saved:false} }); })
+      .catch(e => { this.setState({toast:'Spec error: '+e.message}); this.flashToast(); });
+  };
+  saveSpec = () => {
+    const sp = this.state.spec; if (!sp) return;
+    this.setState(s => ({ spec:{...s.spec, saving:true} }));
+    fetch('/api/spec/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ number:sp.number }) })
+      .then(r=>r.json())
+      .then(d => {
+        if (d.error) { this.setState(s=>({ spec:{...s.spec, saving:false}, toast:d.error })); this.flashToast(); return; }
+        this.setState(s => ({ spec:{...s.spec, saving:false, saved:true}, toast:(d.overwrote?'Overwrote ':'Saved ')+d.saved }));
+        this.flashToast();
+      })
+      .catch(e => { this.setState(s=>({ spec:{...s.spec, saving:false}, toast:'Save error: '+e.message })); this.flashToast(); });
+  };
+  copySpec = () => { try{ navigator.clipboard && navigator.clipboard.writeText(this.state.spec.content); }catch(e){} this.setState({toast:'Spec copied'}); this.flashToast(); };
+
   selectVerdictLive = (n, v) => this.setState(s => ({ liveVerdict:{...s.liveVerdict,[n]:v}, liveConfirmed:{...s.liveConfirmed,[n]:false} }));
   confirmVerdictLive = (n) => {
     const v = this.state.liveVerdict[n] || (this.state.liveReports[n]||{}).status;
@@ -486,9 +518,10 @@ class Studio extends React.Component {
     const crumbNum = liveActive ? liveActive.number : (inv ? inv.number : null);
     return {
       themeClass:isDark?'':'theme-light', isDark, isLight:!isDark,
-      isDashboard:s.view==='dashboard', isNew:s.view==='new', isDetail:s.view==='detail',
-      crumb: s.view==='dashboard'?'Investigations':s.view==='new'?'New investigation':(crumbNum?'#'+crumbNum:'Investigation'),
-      navDashStyle:navBtn(s.view==='dashboard'), navNewStyle:navBtn(s.view==='new'),
+      isDashboard:s.view==='dashboard', isNew:s.view==='new', isDetail:s.view==='detail', isQueue:s.view==='queue',
+      crumb: s.view==='dashboard'?'Investigations':s.view==='new'?'New investigation':s.view==='queue'?'QA queue':(crumbNum?'#'+crumbNum:'Investigation'),
+      navDashStyle:navBtn(s.view==='dashboard'), navNewStyle:navBtn(s.view==='new'), navQueueStyle:navBtn(s.view==='queue'),
+      queue:s.queue, queueLoading:s.queueLoading, queueLabel:s.queueLabel, spec:s.spec,
       navRecent, investigations, stats, examples, targetOpen:s.targetOpen, live:s.live, agent:s.agent, liveActive,
       urlInput:s.urlInput, inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
       runLabel: s.running?'Running…':'Run remaining checks',
@@ -518,6 +551,11 @@ class Studio extends React.Component {
             <button onClick={this.goNew} style={v.navNewStyle}>
               <Svg><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></Svg> New investigation
             </button>
+            {v.live && (
+              <button onClick={this.goQueue} style={v.navQueueStyle}>
+                <Svg><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></Svg> QA queue
+              </button>
+            )}
           </nav>
           <div style={S("padding:6px 18px 8px; color:var(--text3); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase;")}>Recent</div>
           <div style={S("flex:1; overflow:auto; padding:0 10px 10px; display:flex; flex-direction:column; gap:1px;")}>
@@ -583,11 +621,13 @@ class Studio extends React.Component {
           <main style={S("flex:1; overflow:auto;")}>
             {v.isDashboard && this.renderDashboard(v)}
             {v.isNew && this.renderNew(v)}
+            {v.isQueue && this.renderQueue(v)}
             {v.isDetail && (v.liveActive ? this.renderLiveDetail(v.liveActive, v) : this.renderDetail(v))}
           </main>
         </div>
 
         {v.draftOpen && this.renderDraft(v)}
+        {v.spec && this.state.modal==='spec' && this.renderSpec(v)}
         {this.state.busy && (
           <div className="qa-fade" style={S("position:fixed; inset:0; background:rgba(15,18,38,.62); display:flex; align-items:center; justify-content:center; z-index:90; padding:32px;")}>
             <div style={S("max-width:440px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:26px 28px; box-shadow:0 12px 40px rgba(0,0,0,.4);")}>
@@ -856,6 +896,60 @@ class Studio extends React.Component {
     );
   }
 
+  renderQueue(v){
+    return (
+      <div className="qa-fade" style={S("max-width:1080px; margin:0 auto; padding:32px;")}>
+        <div style={S("display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:6px;")}>
+          <h1 style={S("color:var(--text); font-size:24px; margin:0;")}>QA queue</h1>
+          <button onClick={()=>this.loadQueue()} style={S("height:32px; padding:0 14px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text2); font-size:12.5px;")}>Refresh</button>
+        </div>
+        <p style={S("color:var(--text3); font-size:14px; margin:0 0 24px;")}>Open <b style={{color:'var(--text2)'}}>{v.queueLabel}</b> issues in fleetdm/fleet — pick one to investigate against the live build.</p>
+        {v.queueLoading && <div style={S("color:var(--text3); font-size:13px; padding:24px 0;")}>Loading…</div>}
+        <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;")}>
+          {v.queue.map(item=>(
+            <div key={item.number} style={S("display:grid; grid-template-columns:64px minmax(0,1fr) 150px; gap:16px; align-items:center; padding:13px 20px; border-bottom:1px solid var(--border);")}>
+              <a href={"https://github.com/fleetdm/fleet/issues/"+item.number} target="_blank" rel="noopener" style={S("font-family:var(--font-mono); font-size:12.5px; color:var(--accent);")}>#{item.number}</a>
+              <span style={S("min-width:0;")}>
+                <span style={S("display:block; color:var(--text); font-weight:600; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{item.title}</span>
+                <span style={S("display:block; color:var(--text3); font-size:11.5px; margin-top:2px;")}>{item.group||'—'} · reported by {item.reporter}</span>
+              </span>
+              <button onClick={()=>this.runLive(String(item.number))} style={S("justify-self:end; height:32px; padding:0 14px; background:var(--accent); color:#1a1c21; border:none; border-radius:6px; font-weight:600; font-size:12.5px;")}>Investigate</button>
+            </div>
+          ))}
+          {!v.queueLoading && v.queue.length===0 && <div style={S("padding:30px; text-align:center; color:var(--text3); font-size:13px;")}>No open issues for this label.</div>}
+        </div>
+      </div>
+    );
+  }
+
+  renderSpec(v){
+    const sp = v.spec;
+    return (
+      <div onClick={this.closeModal} style={S("position:fixed; inset:0; background:rgba(25,33,71,.5); display:flex; align-items:flex-start; justify-content:center; padding:48px 24px; z-index:60; overflow:auto;")}>
+        <div onClick={this.stop} className="qa-fade" style={S("width:760px; max-width:100%; background:var(--surface); border:1px solid var(--border); border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,.4); overflow:hidden;")}>
+          <div style={S("display:flex; align-items:center; gap:10px; padding:16px 20px; border-bottom:1px solid var(--border);")}>
+            <Svg w={18} h={18} stroke="var(--accent)" d="M3 12h4l3-8 4 16 3-8h4"/>
+            <span style={S("color:var(--text); font-weight:600; font-size:15px;")}>Playwright regression test</span>
+            {sp.exists && <span style={S("font-size:11px; color:var(--warning); background:var(--well); padding:3px 8px; border-radius:4px;")}>file exists — saving overwrites</span>}
+            <button onClick={this.closeModal} style={S("margin-left:auto; width:30px; height:30px; background:transparent; border:none; color:var(--text3); display:flex; align-items:center; justify-content:center;")}><Svg w={18} h={18} d="M18 6 6 18M6 6l12 12"/></button>
+          </div>
+          <div style={S("padding:20px; max-height:56vh; overflow:auto;")}>
+            <div style={S("color:var(--text3); font-size:11px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:6px;")}>Target path</div>
+            <div style={S("background:var(--well); border:1px solid var(--border); border-radius:6px; padding:10px 13px; color:var(--text); font-family:var(--font-mono); font-size:12px; margin-bottom:16px; overflow:auto;")}>{sp.path}</div>
+            <div style={S("color:var(--text3); font-size:11px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:6px;")}>Test</div>
+            <pre style={S("margin:0; background:var(--code-bg); color:var(--code-fg); padding:14px; border-radius:6px; font-size:12px; line-height:1.6; overflow:auto; white-space:pre;")}>{sp.content}</pre>
+          </div>
+          <div style={S("display:flex; align-items:center; gap:12px; padding:16px 20px; border-top:1px solid var(--border); background:var(--bg);")}>
+            <Svg w={15} h={15} stroke="var(--text3)" style={S("flex:none;")}><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></Svg>
+            <span style={S("flex:1; font-size:12px; color:var(--text3);")}>Saving writes the file into your Fleet checkout under tools/qa/playwright. Review it before committing.</span>
+            <button onClick={this.copySpec} style={S("height:38px; padding:0 14px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text2); font-weight:600; font-size:13px;")}>Copy</button>
+            <button onClick={this.saveSpec} disabled={sp.saving} style={S("height:38px; padding:0 18px; background:var(--accent); color:#1a1c21; border:none; border-radius:6px; font-weight:600; font-size:13px;")}>{sp.saving?'Saving…':sp.saved?'Saved ✓':'Save to repo'}</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   renderLiveDetail(rep, v){
     const s = this.state;
     const n = rep.number;
@@ -875,6 +969,7 @@ class Studio extends React.Component {
           <a href={rep.issueUrl||'#'} target="_blank" rel="noopener" style={S("font-family:var(--font-mono); color:var(--accent); font-size:12.5px;")}>fleetdm/fleet#{n}</a>
           <span>·</span><span>{rep.group||'—'}</span><span>·</span><span>reported by {rep.reporter||'—'}</span><span>·</span>
           <span style={S("display:inline-flex; align-items:center; gap:5px; color:var(--success); font-weight:600;")}><span style={{width:'6px',height:'6px',borderRadius:'50%',background:'var(--success)'}}/>live · {rep.instance} · rev {(rep.rev||'').slice(0,8)}</span>
+          {rep.releaseStatus && <span style={{display:'inline-flex',alignItems:'center',gap:'5px',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:700,background:rep.releaseStatus==='Released'?'rgba(255,92,131,.15)':'rgba(61,182,123,.15)',color:rep.releaseStatus==='Released'?'#ff5c83':'#3db67b'}}>{rep.releaseStatus==='Released'?('RELEASED'+(rep.firstRelease?' · '+rep.firstRelease:'')):'UNRELEASED'}</span>}
         </div>
         <div style={S("display:grid; grid-template-columns:1fr 320px; gap:28px; align-items:start;")}>
           {/* TIMELINE */}
@@ -938,7 +1033,15 @@ class Studio extends React.Component {
                 <button onClick={()=>{ try{navigator.clipboard&&navigator.clipboard.writeText(rep.qaComment);}catch(e){} this.setState({toast:'QA comment copied'}); this.flashToast(); }} style={S("background:transparent; border:none; color:var(--accent); font-size:11px; font-weight:600; display:inline-flex; align-items:center; gap:4px; padding:0;")}><Svg w={12} h={12}><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></Svg>Copy</button>
               </div>
               <textarea readOnly value={rep.qaComment} style={S("width:100%; height:148px; resize:none; background:var(--well); border:1px solid var(--border); border-radius:6px; padding:11px; color:var(--text2); font-size:12px; line-height:1.6; outline:none;")}/>
-              <button onClick={this.openDraft} style={S("width:100%; height:40px; margin-top:12px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text); font-weight:600; font-size:13px; display:flex; align-items:center; justify-content:center; gap:8px;")}>Draft GitHub issue</button>
+              {selected==='Fixed'
+                ? (<>
+                    <button onClick={()=>this.genSpec(n)} style={S("width:100%; height:40px; margin-top:12px; background:var(--accent); color:#1a1c21; border:none; border-radius:6px; font-weight:600; font-size:13px; display:flex; align-items:center; justify-content:center; gap:8px;")}><Svg w={15} h={15} stroke="#1a1c21" d="M3 12h4l3-8 4 16 3-8h4"/>Generate Playwright test</button>
+                    <button onClick={this.openDraft} style={S("width:100%; height:34px; margin-top:8px; background:transparent; border:none; color:var(--text3); font-size:12px;")}>or draft a GitHub issue</button>
+                  </>)
+                : (<>
+                    <button onClick={this.openDraft} style={S("width:100%; height:40px; margin-top:12px; background:var(--accent); color:#1a1c21; border:none; border-radius:6px; font-weight:600; font-size:13px; display:flex; align-items:center; justify-content:center; gap:8px;")}><Svg w={15} h={15} fill="#1a1c21" stroke="none" d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49v-1.7c-2.78.62-3.37-1.21-3.37-1.21-.46-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.36-2.22-.26-4.55-1.14-4.55-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.27 2.75 1.05a9.4 9.4 0 0 1 5 0c1.91-1.32 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9v2.81c0 .27.18.6.69.49A10.26 10.26 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/>Draft GitHub issue</button>
+                    <button onClick={()=>this.genSpec(n)} style={S("width:100%; height:34px; margin-top:8px; background:transparent; border:none; color:var(--text3); font-size:12px;")}>or generate a Playwright test</button>
+                  </>)}
             </div>
             <div style={S("margin-top:14px; padding:13px 15px; background:var(--surface); border:1px solid var(--border); border-radius:8px; display:flex; gap:9px;")}><Svg w={15} h={15} stroke="var(--text3)" style={S("flex:none; margin-top:1px;")}><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></Svg><span style={S("font-size:11.5px; color:var(--text3); line-height:1.5;")}>Reads are free. Live-instance writes and issue submission always require an explicit confirm.</span></div>
           </div>

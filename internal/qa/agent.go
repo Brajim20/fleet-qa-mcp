@@ -25,6 +25,7 @@ Method:
 - Reproduce against the live instance: call the API the issue describes, and/or open the relevant page in a real browser.
 - Root-cause in code pinned to the DEPLOYED revision (grep_code / code_at_rev) — never reason about a file you haven't read at that rev.
 - If the issue or a comment names a fix PR/commit, check whether it is in the build (is_in_build).
+- For a real bug, determine whether it is RELEASED or UNRELEASED: use log_search to find the commit that introduced the buggy code, then classify_release on that commit. Released bugs reached customers (patch release); unreleased were caught in time.
 - Prefer the most specific identifier (a filename, snake_case symbol, API field) over generic words.
 
 All tools are READ-ONLY and safe. You cannot and must not attempt any write.
@@ -64,6 +65,8 @@ func agentTools() []llm.Tool {
 				"needle":   str("string whose introduction you want to find"),
 				"pathspec": str("optional path filter"),
 			}, "needle")},
+		{Name: "classify_release", Description: "Is a commit shipped in a stable Fleet release? Returns Released (+earliest fleet-v* tag) or Unreleased. Use the introducing commit to classify a bug as released vs unreleased.",
+			InputSchema: obj(map[string]any{"commit": str("commit SHA (e.g. from log_search)")}, "commit")},
 		{Name: "submit_verdict", Description: "Finish the investigation with a verdict and a QA comment citing the evidence.",
 			InputSchema: obj(map[string]any{
 				"verdict":    map[string]any{"type": "string", "enum": []string{"Fixed", "Confirmed bug", "Not a bug", "Cannot reproduce"}},
@@ -133,6 +136,7 @@ func (a *App) investigateAgentic(c *llm.Client, ref, shotDir, shotURLBase string
 					shotURL = shotURLBase + "/" + fmt.Sprintf("agent-%d-%d.png", num, shotN)
 				}
 			}
+			rep.Route = ensureSlash(in.Path)
 			pageURL := strings.TrimRight(a.Inst.URL, "/") + ensureSlash(in.Path)
 			out, err := a.BrowserEval(pageURL, in.JS, shotPath)
 			a.recordStep(rep, "reproduce", "browser", "Reproduce in live browser", "browser.eval", "open "+in.Path, out, err, shotURL)
@@ -174,6 +178,22 @@ func (a *App) investigateAgentic(c *llm.Client, ref, shotDir, shotURLBase string
 			out, err := a.LogSearch(in.Needle, "origin/main", in.Pathspec)
 			a.recordStep(rep, "rootcause", "", "Find introducing commit", "log_search", in.Needle, out, err, "")
 			return outOrErr(out, err), nil
+		case "classify_release":
+			var in struct {
+				Commit string `json:"commit"`
+			}
+			_ = json.Unmarshal(input, &in)
+			status, first, err := a.ClassifyRelease(in.Commit)
+			out := status
+			if status == "Released" {
+				out = "Released (shipped since " + first + ")"
+				rep.ReleaseStatus, rep.FirstRelease, rep.IntroCommit = status, first, in.Commit
+			} else if status == "Unreleased" {
+				out = "Unreleased (not in any fleet-v* release)"
+				rep.ReleaseStatus, rep.IntroCommit = status, in.Commit
+			}
+			a.recordStep(rep, "release", "", "Released or unreleased?", "tag --contains", short(in.Commit), out, err, "")
+			return outOrErr(out, err), nil
 		}
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -202,7 +222,7 @@ func (a *App) investigateAgentic(c *llm.Client, ref, shotDir, shotURLBase string
 	draft, derr := a.BuildIssueURL(issue.Title,
 		"See investigation evidence below (agent-driven, against the live deployed build).",
 		"Investigated against "+rep.Instance+" — Fleet "+rep.Version+" (rev "+short(rep.Rev)+").",
-		rep.Version, "", qaComment, issue.Labels)
+		rep.Version, "", qaComment, append(issue.Labels, releaseLabels(rep)...))
 	if derr == nil {
 		if idx := strings.Index(draft, "https://"); idx >= 0 {
 			rep.DraftURL = strings.TrimSpace(draft[idx:])

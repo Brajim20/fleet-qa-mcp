@@ -70,3 +70,35 @@ func LogSearch(repo, ref, needle, pathspec string) (string, error) {
 	}
 	return git(repo, args...)
 }
+
+// IntroducingCommit returns the full SHA of the most recent commit on ref whose
+// diff changed `needle` — i.e. the commit that introduced the code in question.
+// Empty string (nil error) when nothing matched.
+func IntroducingCommit(repo, ref, needle, pathspec string) (string, error) {
+	args := []string{"log", ref, "-S", needle, "-n", "1", "--format=%H"}
+	if pathspec != "" {
+		args = append(args, "--", pathspec)
+	}
+	out, err := git(repo, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// TagsContaining lists tags matching pattern whose history includes commit
+// (i.e. releases that shipped this commit), version-sorted ascending. Used to
+// classify a bug as released vs unreleased.
+func TagsContaining(repo, commit, pattern string) ([]string, error) {
+	out, err := git(repo, "tag", "--contains", commit, "--list", pattern, "--sort=v:refname")
+	if err != nil {
+		return nil, err
+	}
+	var tags []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if t := strings.TrimSpace(line); t != "" {
+			tags = append(tags, t)
+		}
+	}
+	return tags, nil
+}

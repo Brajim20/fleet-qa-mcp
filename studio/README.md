@@ -48,6 +48,23 @@ autonomous agent is in the loop.
 What to grep / which API to hit is auto-derived from the issue text (heuristics in
 `internal/qa/investigate.go`); the human owns the verdict.
 
+### The QA loop
+Beyond investigating one issue, LIVE mode covers the workflow end-to-end:
+
+- **QA queue** — the sidebar "QA queue" lists real open `bug` issues from fleetdm/fleet
+  (`GET /api/queue?label=bug`); click **Investigate** on any of them.
+- **Released vs unreleased** — every investigation traces the commit that introduced the
+  buggy code and runs `git tag --contains` against the `fleet-v*` release tags: **Released**
+  (shipped to customers → needs a patch) or **Unreleased** (caught pre-release → auto-adds
+  the `~unreleased bug` label). Shown as a timeline step and a pill on the detail header.
+- **Verdict-driven output** — once you confirm a verdict:
+  - **Confirmed bug / Cannot reproduce** → a prefilled GitHub issue (root cause + released/
+    unreleased + labels baked in), opened for review — never auto-posted.
+  - **Fixed** → a **Playwright regression test** matching this repo's conventions
+    (`authenticated-test` fixture, `tests/smoke/<area>/<slug>.spec.ts`). Preview it, then
+    **Save to repo** writes it into your Fleet checkout under `tools/qa/playwright/` (the one
+    file-mutating action — explicit click only, path-guarded to the tests directory).
+
 ## DEMO mode (mock data)
 Opened as a plain static file (e.g. GitHub Pages), it falls back to a scripted
 walkthrough with mock investigations (#47712, #43310, #46920, …) — no backend needed.

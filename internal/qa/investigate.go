@@ -44,6 +44,14 @@ type Report struct {
 	QAComment string       `json:"qaComment"`
 	DraftURL  string       `json:"draftUrl"`
 	Error     string       `json:"error,omitempty"`
+
+	// Release classification (released vs unreleased), when we can trace the
+	// introducing commit. Drives the prefilled-issue labels.
+	ReleaseStatus string `json:"releaseStatus"` // "Released" | "Unreleased" | ""
+	FirstRelease  string `json:"firstRelease"`  // earliest fleet-v* tag containing the bug, if released
+	IntroCommit   string `json:"introCommit"`   // commit that introduced the buggy code
+
+	Route string `json:"route"` // UI route reproduced against (for generated Playwright tests)
 }
 
 // Investigate runs an investigation for one issue against the live deployed
@@ -114,21 +122,31 @@ func (a *App) investigateHeuristic(ref, shotDir, shotURLBase string) *Report {
 	}
 
 	// 3b. Reproduce in a real browser against the relevant page.
+	rep.Route = guessRoute(issue.Body)
 	rep.Steps = append(rep.Steps, a.stepBrowser(issue, shotDir, shotURLBase))
 
 	// 4. Root cause — grep the deployed source for an identifier from the issue.
+	kw := extractKeywords(issue.Title + "\n" + issue.Body)
 	rep.Steps = append(rep.Steps, a.stepRootCause(issue))
 
-	// 5. Build check — is any referenced commit in the deployed build?
+	// 5. Released or unreleased? Trace the introducing commit for the top
+	// identifier and check whether it shipped in a stable release.
+	topSymbol := ""
+	if len(kw) > 0 {
+		topSymbol = kw[0]
+	}
+	rep.Steps = append(rep.Steps, a.stepRelease(rep, topSymbol, "."))
+
+	// 6. Build check — is any referenced commit in the deployed build?
 	rep.Steps = append(rep.Steps, a.stepBuildCheck(issue))
 
-	// 6. Draft a prefilled issue URL from the gathered evidence.
+	// 7. Draft a prefilled issue URL from the gathered evidence.
 	rep.QAComment = buildQAComment(rep)
 	draft, derr := a.BuildIssueURL(
 		issue.Title,
 		"See investigation evidence below (live API + browser + source at deployed rev).",
 		"Investigated against "+rep.Instance+" — Fleet "+rep.Version+" (rev "+short(rep.Rev)+").",
-		rep.Version, "", rep.QAComment, issue.Labels)
+		rep.Version, "", rep.QAComment, append(issue.Labels, releaseLabels(rep)...))
 	if derr == nil {
 		// BuildIssueURL prefixes a human note; keep just the URL for the UI.
 		if idx := strings.Index(draft, "https://"); idx >= 0 {
@@ -275,6 +293,11 @@ func buildQAComment(rep *Report) string {
 			continue
 		}
 		fmt.Fprintf(&b, "• %s: %s\n", s.Title, s.Summary)
+	}
+	if rep.ReleaseStatus == "Released" {
+		fmt.Fprintf(&b, "\nClassification: RELEASED — shipped since %s. Likely needs a patch release.\n", rep.FirstRelease)
+	} else if rep.ReleaseStatus == "Unreleased" {
+		fmt.Fprintf(&b, "\nClassification: UNRELEASED — caught before release (~unreleased bug).\n")
 	}
 	return strings.TrimSpace(b.String())
 }

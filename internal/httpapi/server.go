@@ -17,9 +17,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/Brajim20/fleet-qa-mcp/internal/ghissue"
 	"github.com/Brajim20/fleet-qa-mcp/internal/llm"
 	"github.com/Brajim20/fleet-qa-mcp/internal/qa"
 )
@@ -54,11 +56,14 @@ func New(app *qa.App, studioDir string) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", s.handleHealth)
+	mux.HandleFunc("/api/queue", s.handleQueue)
 	mux.HandleFunc("/api/investigations", s.handleList)
 	mux.HandleFunc("/api/investigate", s.handleInvestigate)
 	mux.HandleFunc("/api/report", s.handleReport)
 	mux.HandleFunc("/api/verdict", s.handleVerdict)
-	mux.HandleFunc("/api/request", s.handleRequest) // ad-hoc REST proxy (read-only unless confirm)
+	mux.HandleFunc("/api/spec", s.handleSpec)          // generate a Playwright test (preview)
+	mux.HandleFunc("/api/spec/save", s.handleSpecSave) // write it into the repo (gated)
+	mux.HandleFunc("/api/request", s.handleRequest)    // ad-hoc REST proxy (read-only unless confirm)
 
 	// Screenshots captured during browser repros.
 	mux.Handle("/shots/", http.StripPrefix("/shots/", http.FileServer(http.Dir(s.shotDir))))
@@ -80,6 +85,28 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		out["error"] = err.Error()
 	}
 	writeJSON(w, 200, out)
+}
+
+// handleQueue lists the QA backlog — open fleetdm/fleet issues labeled with the
+// given label (default "bug"), most-recently-updated first.
+func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
+	label := r.URL.Query().Get("label")
+	if label == "" {
+		label = "bug"
+	}
+	issues, err := ghissue.List(label, 30)
+	if err != nil {
+		writeErr(w, 502, err.Error())
+		return
+	}
+	list := make([]map[string]any, 0, len(issues))
+	for _, i := range issues {
+		list = append(list, map[string]any{
+			"number": i.Number, "title": i.Title, "reporter": i.Reporter,
+			"group": i.ProductGroup(), "labels": i.Labels,
+		})
+	}
+	writeJSON(w, 200, map[string]any{"label": label, "issues": list})
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
@@ -145,6 +172,77 @@ func (s *Server) handleVerdict(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// handleSpec generates (but does not write) a Playwright regression test for a
+// stored investigation, for preview in the UI.
+func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
+	rep := s.reportFromBody(r)
+	if rep == nil {
+		writeErr(w, 404, "no investigation for that issue this session")
+		return
+	}
+	relPath, content := qa.GenerateSpec(rep)
+	exists := false
+	if dir := s.playwrightDir(); dir != "" {
+		if _, err := os.Stat(filepath.Join(dir, relPath)); err == nil {
+			exists = true
+		}
+	}
+	writeJSON(w, 200, map[string]any{"path": "tools/qa/playwright/" + relPath, "relPath": relPath, "content": content, "exists": exists})
+}
+
+// handleSpecSave writes the generated test into the Fleet checkout's Playwright
+// suite. This is the one file-mutating action — it only ever runs on an explicit
+// "Save" click, and the target is constrained to the tests directory.
+func (s *Server) handleSpecSave(w http.ResponseWriter, r *http.Request) {
+	dir := s.playwrightDir()
+	if dir == "" {
+		writeErr(w, 400, "no Fleet repo resolved (set FLEET_REPO) — can't save the test")
+		return
+	}
+	rep := s.reportFromBody(r)
+	if rep == nil {
+		writeErr(w, 404, "no investigation for that issue this session")
+		return
+	}
+	relPath, content := qa.GenerateSpec(rep)
+	target := filepath.Join(dir, relPath)
+	// Safety: the resolved path must stay inside the Playwright tests dir.
+	if rel, err := filepath.Rel(dir, target); err != nil || strings.HasPrefix(rel, "..") {
+		writeErr(w, 400, "refusing to write outside the Playwright directory")
+		return
+	}
+	_, existed := os.Stat(target)
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"saved": "tools/qa/playwright/" + relPath, "overwrote": existed == nil})
+}
+
+func (s *Server) reportFromBody(r *http.Request) *qa.Report {
+	var in struct {
+		Number int `json:"number"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&in)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if run, ok := s.runs[in.Number]; ok {
+		return run.Report
+	}
+	return nil
+}
+
+func (s *Server) playwrightDir() string {
+	if s.app.Repo == "" {
+		return ""
+	}
+	return filepath.Join(s.app.Repo, "tools", "qa", "playwright")
 }
 
 func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
