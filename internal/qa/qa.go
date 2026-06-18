@@ -148,6 +148,51 @@ func (a *App) BrowserEval(pageURL, js, screenshot string) (string, error) {
 	return string(b) + note, nil
 }
 
+// SampleFrames opens a page and records per-frame values of selectors over
+// durationMs (optionally after firing a JS trigger), then collapses
+// consecutive-identical frames into a compact transition log — for catching
+// flashes/desyncs that single screenshots miss.
+func (a *App) SampleFrames(pageURL string, selectors, props []string, durationMs int, trigger string) (string, error) {
+	sess, err := browser.Open(a.Inst.URL, pageURL)
+	if err != nil {
+		return "", err
+	}
+	defer sess.Close()
+	raw, err := sess.SampleFrames(selectors, props, durationMs, trigger)
+	if err != nil {
+		return "", err
+	}
+	rows, ok := raw.([]interface{})
+	if !ok {
+		b, _ := json.MarshalIndent(raw, "", "  ")
+		return string(b), nil
+	}
+	// Keep only frames whose values changed (ignoring the timestamp), so the
+	// output is the transition log, not 90 near-identical rows.
+	var kept []interface{}
+	prevKey := "\x00"
+	for _, r := range rows {
+		m, _ := r.(map[string]interface{})
+		if k := nonTimeKey(m); k != prevKey {
+			kept = append(kept, r)
+			prevKey = k
+		}
+	}
+	b, _ := json.MarshalIndent(kept, "", "  ")
+	return fmt.Sprintf("%d frames sampled, %d transitions:\n%s", len(rows), len(kept), string(b)), nil
+}
+
+func nonTimeKey(m map[string]interface{}) string {
+	cp := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		if k != "t" {
+			cp[k] = v
+		}
+	}
+	b, _ := json.Marshal(cp)
+	return string(b)
+}
+
 func (a *App) BuildIssueURL(title, actual, steps, discovered, toFix, moreInfo string, labels []string) (string, error) {
 	if discovered == "" {
 		if v, err := a.Inst.DeployedVersion(); err == nil {

@@ -35,6 +35,11 @@ You don't set a URL in `.mcp.json`. The server resolves the instance like this:
    default, so your own instance "just works" with zero extra config.
 3. `https://localhost:8080` fallback.
 
+**Token auto-refresh:** the admin token expires ~hourly. Set **`FLEET_PASSWORD`** in your
+`.env` (email comes from `~/.fleet/config`, or set `FLEET_EMAIL`) and the server
+transparently re-logs-in on a 401 and retries — no mid-session interruption. Without a
+password it falls back to a clear "run `fleetctl login`" message.
+
 For the **code tools** (read deployed code, check build membership) the server needs a
 Fleet source checkout:
 
@@ -58,6 +63,7 @@ Copy `.env.example` → `.env` (gitignored) for any overrides.
 | `log_search` | which commit/PR introduced a string |
 | `fleet_request` | authenticated REST (read-only unless `confirm=true`) |
 | `browser_eval` | open a URL in real Chromium, run JS, optional screenshot — for repros & DOM measurement |
+| `browser_sample_frames` | per-frame sampler for timing/visual bugs (flashes, theme desync) — records computed-style props across an optional trigger, returns a collapsed transition log |
 | `build_issue_url` | **prefilled** GitHub issue URL from the bug-report template |
 
 ---

@@ -117,6 +117,44 @@ func Open(instanceURL, pageURL string) (*Session, error) {
 // Eval runs a JS expression in the page and returns the (JSON-able) result.
 func (s *Session) Eval(js string) (interface{}, error) { return s.page.Evaluate(js) }
 
+// sampleJS runs a requestAnimationFrame loop for durationMs, recording the
+// chosen computed-style props (or "text") of each selector every frame.
+// Captures a baseline, fires the optional trigger, then samples across the
+// transition — ideal for flashes/desyncs that single screenshots miss.
+const sampleJS = `(args) => new Promise((resolve) => {
+  const {selectors, props, durationMs, trigger} = args;
+  const samples = [];
+  const t0 = performance.now();
+  const snap = () => {
+    const row = {t: Math.round(performance.now() - t0)};
+    for (const sel of selectors) {
+      const e = document.querySelector(sel);
+      if (!e) { row[sel] = null; continue; }
+      const cs = getComputedStyle(e);
+      const o = {};
+      for (const p of props) o[p] = (p === 'text') ? (e.textContent||'').trim().slice(0,50) : cs.getPropertyValue(p);
+      row[sel] = o;
+    }
+    samples.push(row);
+  };
+  snap();                                   // baseline (~t=0)
+  if (trigger) { try { eval(trigger); } catch (e) { samples.push({trigger_error: String(e)}); } }
+  const loop = () => {
+    snap();
+    if (performance.now() - t0 < durationMs) requestAnimationFrame(loop);
+    else resolve(samples);
+  };
+  requestAnimationFrame(loop);
+})`
+
+// SampleFrames records per-frame values of selectors over durationMs, optionally
+// after firing a JS trigger (e.g. a theme toggle or a click).
+func (s *Session) SampleFrames(selectors, props []string, durationMs int, trigger string) (interface{}, error) {
+	return s.page.Evaluate(sampleJS, map[string]interface{}{
+		"selectors": selectors, "props": props, "durationMs": durationMs, "trigger": trigger,
+	})
+}
+
 // Screenshot writes a PNG and returns its path.
 func (s *Session) Screenshot(path string) (string, error) {
 	_, err := s.page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String(path)})

@@ -202,6 +202,28 @@ func registerMCP(s *server.MCPServer, a *qa.App) {
 			return wrap(func() (string, error) { return a.BrowserEval(u, j, mcp.ParseString(r, "screenshot", "")) })(context.Background(), r)
 		})
 
+	s.AddTool(mcp.NewTool("browser_sample_frames",
+		mcp.WithDescription("Per-frame sampler for timing/visual bugs (flashes, theme desync). Records computed-style props of selectors every frame for duration_ms, optionally after a JS trigger; returns a collapsed transition log."),
+		mcp.WithString("url", mcp.Required()),
+		mcp.WithString("selectors", mcp.Required(), mcp.Description("comma-separated CSS selectors")),
+		mcp.WithString("props", mcp.DefaultString("background-color,color"), mcp.Description("comma-separated computed CSS props (kebab-case), or 'text'")),
+		mcp.WithNumber("duration_ms", mcp.DefaultNumber(1500)),
+		mcp.WithString("trigger", mcp.Description("JS run after the baseline frame to start a transition, e.g. a click or theme toggle"))),
+		func(_ context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			u, bad := req(r, "url")
+			if bad != nil {
+				return bad, nil
+			}
+			sel, bad := req(r, "selectors")
+			if bad != nil {
+				return bad, nil
+			}
+			return wrap(func() (string, error) {
+				return a.SampleFrames(u, splitCSV(sel), splitCSV(mcp.ParseString(r, "props", "background-color,color")),
+					mcp.ParseInt(r, "duration_ms", 1500), mcp.ParseString(r, "trigger", ""))
+			})(context.Background(), r)
+		})
+
 	s.AddTool(mcp.NewTool("build_issue_url",
 		mcp.WithDescription("Build a PREFILLED GitHub issue URL (Fleet bug-report template). Never submits."),
 		mcp.WithString("title", mcp.Required()),
@@ -243,7 +265,8 @@ func req(r mcp.CallToolRequest, key string) (string, *mcp.CallToolResult) {
 
 var subcommands = map[string]bool{
 	"whoami": true, "code-at-rev": true, "grep": true, "is-in-build": true,
-	"log-search": true, "request": true, "browser-eval": true, "issue": true, "help": true,
+	"log-search": true, "request": true, "browser-eval": true, "sample-frames": true,
+	"issue": true, "help": true,
 }
 
 func isSubcommand(s string) bool { return subcommands[s] }
@@ -267,6 +290,10 @@ func runCLI(name string, args []string) {
 	body := fs.String("body", "", "request body")
 	confirm := fs.Bool("confirm", false, "allow non-GET writes")
 	shot := fs.String("screenshot", "", "screenshot path")
+	selectors := fs.String("selectors", "", "comma-separated CSS selectors (sample-frames)")
+	props := fs.String("props", "background-color,color", "comma-separated computed CSS props or 'text'")
+	duration := fs.Int("duration", 1500, "sampling duration in ms")
+	trigger := fs.String("trigger", "", "JS to fire after baseline (sample-frames)")
 	title := fs.String("title", "", "issue title")
 	actual := fs.String("actual", "", "actual behavior")
 	steps := fs.String("steps", "", "repro steps")
@@ -301,6 +328,8 @@ func runCLI(name string, args []string) {
 		}
 	case "browser-eval":
 		out, err = a.BrowserEval(arg(pos, 0, "url"), arg(pos, 1, "js"), *shot)
+	case "sample-frames":
+		out, err = a.SampleFrames(arg(pos, 0, "url"), splitCSV(*selectors), splitCSV(*props), *duration, *trigger)
 	case "issue":
 		out, err = a.BuildIssueURL(*title, *actual, *steps, *discovered, *toFix, *moreInfo, splitCSV(*labels))
 	}
@@ -321,6 +350,8 @@ func printCLIHelp() {
   log-search [--ref R] <needle>  which commit introduced a string
   request [--method M] [--body B] [--confirm] <path>   authenticated REST call
   browser-eval <url> <js> [--screenshot P]             run JS in real Chromium
+  sample-frames <url> --selectors "a,b" [--props ...] [--duration N] [--trigger JS]
+                                                       per-frame sampler for timing/visual bugs
   issue --title T --actual A --steps S [--labels ...]  prefilled GitHub issue URL
 
 Setup: --install-browsers | --auth | --provision-repo ; flags may appear anywhere.

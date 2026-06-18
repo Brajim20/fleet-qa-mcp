@@ -8,6 +8,7 @@
 package fleetcfg
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -25,62 +26,72 @@ import (
 type Instance struct {
 	URL      string
 	Token    string
+	Email    string // for token auto-refresh on 401
+	Password string // from FLEET_PASSWORD; never persisted
 	SkipTLS  bool
-	Source   string // where the values came from, for `whoami`
+	Source   string
 	httpc    *http.Client
 }
 
 type fleetCtxFile struct {
 	Contexts map[string]struct {
 		Address       string `yaml:"address"`
+		Email         string `yaml:"email"`
 		Token         string `yaml:"token"`
 		TLSSkipVerify bool   `yaml:"tls-skip-verify"`
 	} `yaml:"contexts"`
 }
 
-// Resolve picks the instance using the precedence above. ctxName selects which
-// ~/.fleet/config context to read (default "default").
+// Resolve picks the instance using the precedence above.
 func Resolve(ctxName string) (*Instance, error) {
 	if ctxName == "" {
 		ctxName = "default"
 	}
-	inst := &Instance{}
+	inst := &Instance{Password: os.Getenv("FLEET_PASSWORD")}
 
 	if u := os.Getenv("FLEET_URL"); u != "" {
 		inst.URL, inst.Token, inst.Source = u, os.Getenv("FLEET_TOKEN"), "env FLEET_URL"
-	} else if u, t, skip, ok := fromFleetctlConfig(ctxName); ok {
-		inst.URL, inst.Token, inst.SkipTLS, inst.Source = u, t, skip, "~/.fleet/config["+ctxName+"]"
+		inst.Email = os.Getenv("FLEET_EMAIL")
+	} else if c, ok := fromFleetctlConfig(ctxName); ok {
+		inst.URL, inst.Token, inst.Email, inst.SkipTLS = c.addr, c.token, c.email, c.skip
+		inst.Source = "~/.fleet/config[" + ctxName + "]"
 	} else {
 		inst.URL, inst.SkipTLS, inst.Source = "https://localhost:8080", true, "default fallback"
 	}
+	if e := os.Getenv("FLEET_EMAIL"); e != "" {
+		inst.Email = e // explicit override
+	}
 
 	inst.httpc = &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: inst.SkipTLS}, //nolint:gosec // dev tunnels use self-signed/ngrok
-		},
+		Timeout:   30 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: inst.SkipTLS}}, //nolint:gosec // dev tunnels
 	}
 	return inst, nil
 }
 
-func fromFleetctlConfig(ctxName string) (url, token string, skipTLS, ok bool) {
+type ctxVals struct {
+	addr, email, token string
+	skip               bool
+}
+
+func fromFleetctlConfig(ctxName string) (ctxVals, bool) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", "", false, false
+		return ctxVals{}, false
 	}
 	b, err := os.ReadFile(filepath.Join(home, ".fleet", "config"))
 	if err != nil {
-		return "", "", false, false
+		return ctxVals{}, false
 	}
 	var c fleetCtxFile
 	if err := yaml.Unmarshal(b, &c); err != nil {
-		return "", "", false, false
+		return ctxVals{}, false
 	}
 	cx, ok := c.Contexts[ctxName]
 	if !ok || cx.Address == "" {
-		return "", "", false, false
+		return ctxVals{}, false
 	}
-	return cx.Address, cx.Token, cx.TLSSkipVerify, true
+	return ctxVals{addr: cx.Address, email: cx.Email, token: cx.Token, skip: cx.TLSSkipVerify}, true
 }
 
 // Version is the subset of GET /api/latest/fleet/version we care about.
@@ -98,7 +109,7 @@ func (i *Instance) DeployedVersion() (*Version, error) {
 		return nil, err
 	}
 	if status != 200 {
-		return nil, fmt.Errorf("version endpoint returned %d (token expired? run `make qa-auth`)", status)
+		return nil, fmt.Errorf("version endpoint returned %d", status)
 	}
 	var v Version
 	if err := json.Unmarshal(body, &v); err != nil {
@@ -107,18 +118,41 @@ func (i *Instance) DeployedVersion() (*Version, error) {
 	return &v, nil
 }
 
-// Request performs an authenticated REST call against the instance and returns
-// the raw body + HTTP status. A 401 means the admin token expired.
+// Request performs an authenticated REST call. On a 401 it transparently
+// re-logs-in (if email+FLEET_PASSWORD are available) and retries once, so a
+// teammate's hourly token expiry doesn't interrupt a session.
 func (i *Instance) Request(method, path string, body io.Reader) ([]byte, int, error) {
-	req, err := http.NewRequest(method, i.URL+path, body)
+	var bodyBytes []byte
+	if body != nil {
+		bodyBytes, _ = io.ReadAll(body)
+	}
+	out, status, err := i.do(method, path, bodyBytes)
+	if err != nil {
+		return nil, status, err
+	}
+	if status == 401 && i.canRefresh() {
+		if lerr := i.login(); lerr == nil {
+			out, status, err = i.do(method, path, bodyBytes)
+		}
+	}
+	return out, status, err
+}
+
+func (i *Instance) canRefresh() bool { return i.Email != "" && i.Password != "" }
+
+func (i *Instance) do(method, path string, body []byte) ([]byte, int, error) {
+	var rdr io.Reader
+	if body != nil {
+		rdr = bytes.NewReader(body)
+	}
+	req, err := http.NewRequest(method, i.URL+path, rdr)
 	if err != nil {
 		return nil, 0, err
 	}
 	if i.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+i.Token)
 	}
-	// ngrok free shows an interstitial to browsers; this header bypasses it.
-	req.Header.Set("ngrok-skip-browser-warning", "true")
+	req.Header.Set("ngrok-skip-browser-warning", "true") // bypass ngrok interstitial
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := i.httpc.Do(req)
 	if err != nil {
@@ -129,15 +163,32 @@ func (i *Instance) Request(method, path string, body io.Reader) ([]byte, int, er
 	return b, resp.StatusCode, nil
 }
 
+// login exchanges email+password for a fresh session token (in-memory only).
+func (i *Instance) login() error {
+	payload, _ := json.Marshal(map[string]string{"email": i.Email, "password": i.Password})
+	b, status, err := i.do("POST", "/api/latest/fleet/login", payload)
+	if err != nil {
+		return err
+	}
+	if status != 200 {
+		return fmt.Errorf("re-login failed: HTTP %d", status)
+	}
+	var r struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(b, &r); err != nil || r.Token == "" {
+		return fmt.Errorf("re-login: no token in response")
+	}
+	i.Token = r.Token
+	return nil
+}
+
 const managedRepoDir = ".fleet-src"
 
-// ResolveRepo returns a path to a Fleet source checkout for the code tools, or
-// "" (with a nil error) if none is available — code tools then report a clear
-// "set FLEET_REPO" message instead of the server hanging.
-//
-// It NEVER clones implicitly: a silent multi-GB clone of fleetdm/fleet mid-call
-// is a terrible surprise. Use ProvisionRepo (an explicit setup step) for that.
-// Precedence: FLEET_REPO env -> an existing managed clone under ./.fleet-src.
+// ResolveRepo returns a Fleet source checkout for the code tools, or "" (nil
+// error) if none — code tools then report a clear message. NEVER clones
+// implicitly (a silent multi-GB clone mid-call is a terrible surprise); use
+// ProvisionRepo for that.
 func ResolveRepo() (string, error) {
 	if r := os.Getenv("FLEET_REPO"); r != "" {
 		if _, err := os.Stat(filepath.Join(r, ".git")); err == nil {
@@ -148,18 +199,16 @@ func ResolveRepo() (string, error) {
 	if _, err := os.Stat(filepath.Join(managedRepoDir, ".git")); err == nil {
 		return managedRepoDir, nil
 	}
-	return "", nil // no repo; code tools will say "set FLEET_REPO or run --provision-repo"
+	return "", nil
 }
 
-// ProvisionRepo clones fleetdm/fleet into the managed dir (explicit, opt-in —
-// e.g. `fleet-qa-mcp --provision-repo`). Slow; only for users with no checkout.
+// ProvisionRepo clones fleetdm/fleet into the managed dir (explicit, opt-in).
 func ProvisionRepo() (string, error) {
 	if _, err := os.Stat(filepath.Join(managedRepoDir, ".git")); err == nil {
-		return managedRepoDir, nil // already provisioned
+		return managedRepoDir, nil
 	}
 	cmd := exec.Command("git", "clone", "https://github.com/fleetdm/fleet.git", managedRepoDir)
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
+	cmd.Stderr, cmd.Stdout = os.Stderr, os.Stdout
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("clone failed (set FLEET_REPO to an existing checkout instead): %w", err)
 	}
