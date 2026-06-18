@@ -10,10 +10,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/fleetdm/fleet-qa-mcp/internal/browser"
-	"github.com/fleetdm/fleet-qa-mcp/internal/fleetcfg"
-	"github.com/fleetdm/fleet-qa-mcp/internal/ghissue"
-	"github.com/fleetdm/fleet-qa-mcp/internal/gitcode"
+	"github.com/Brajim20/fleet-qa-mcp/internal/browser"
+	"github.com/Brajim20/fleet-qa-mcp/internal/fleetcfg"
+	"github.com/Brajim20/fleet-qa-mcp/internal/ghissue"
+	"github.com/Brajim20/fleet-qa-mcp/internal/gitcode"
 )
 
 // App holds the resolved instance + Fleet source repo.

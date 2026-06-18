@@ -1,4 +1,4 @@
-module github.com/fleetdm/fleet-qa-mcp
+module github.com/Brajim20/fleet-qa-mcp
 
 go 1.23
 

@@ -17,9 +17,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/fleetdm/fleet-qa-mcp/internal/browser"
-	"github.com/fleetdm/fleet-qa-mcp/internal/fleetcfg"
-	"github.com/fleetdm/fleet-qa-mcp/internal/qa"
+	"github.com/Brajim20/fleet-qa-mcp/internal/browser"
+	"github.com/Brajim20/fleet-qa-mcp/internal/fleetcfg"
+	"github.com/Brajim20/fleet-qa-mcp/internal/qa"
 
 	"github.com/joho/godotenv"
 	"github.com/mark3labs/mcp-go/mcp"
