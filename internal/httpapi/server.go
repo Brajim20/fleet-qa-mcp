@@ -94,7 +94,12 @@ func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
 	if label == "" {
 		label = "bug"
 	}
-	issues, err := ghissue.List(label, 30)
+	// Optional product-group filter (#g-*). GitHub treats comma-separated labels
+	// as AND, so "bug,#g-software" = open software bugs.
+	if g := r.URL.Query().Get("group"); g != "" {
+		label = label + "," + g
+	}
+	issues, err := ghissue.List(label, 50)
 	if err != nil {
 		writeErr(w, 502, err.Error())
 		return
@@ -103,7 +108,7 @@ func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
 	for _, i := range issues {
 		list = append(list, map[string]any{
 			"number": i.Number, "title": i.Title, "reporter": i.Reporter,
-			"group": i.ProductGroup(), "labels": i.Labels,
+			"group": i.ProductGroup(), "labels": i.Labels, "status": ghissue.WorkflowStatus(i.Labels),
 		})
 	}
 	writeJSON(w, 200, map[string]any{"label": label, "issues": list})

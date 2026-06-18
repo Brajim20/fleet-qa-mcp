@@ -144,6 +144,32 @@ func List(label string, limit int) ([]*Issue, error) {
 	return out, nil
 }
 
+// workflowStatuses maps Fleet's GitHub process labels (the ones that drive its
+// issue workflow / project boards) to a display status, most-advanced first —
+// an issue may carry several, so we report the furthest-along.
+var workflowStatuses = []struct{ label, status string }{
+	{":release", "Release"},     // accepted into an engineering release cycle
+	{"~assisting qa", "In QA"},  // QA actively working it
+	{":product", "Product"},     // product triage
+	{":reproduce", "Reproduce"}, // needs reproduction
+	{":incoming", "Incoming"},   // newly filed, untriaged
+}
+
+// WorkflowStatus derives a ticket's status from its labels using Fleet's process
+// vocabulary. Falls back to "Triage" when no process label is present.
+func WorkflowStatus(labels []string) string {
+	have := make(map[string]bool, len(labels))
+	for _, l := range labels {
+		have[l] = true
+	}
+	for _, ws := range workflowStatuses {
+		if have[ws.label] {
+			return ws.status
+		}
+	}
+	return "Triage"
+}
+
 // ProductGroup returns the first "#g-" group label (Fleet's owning-group
 // convention), or "" if none.
 func (i *Issue) ProductGroup() string {

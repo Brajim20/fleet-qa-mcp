@@ -107,7 +107,18 @@ class Studio extends React.Component {
     live: false, liveList: [], liveReports: {}, busy: false, busyMsg: '',
     liveVerdict: {}, liveConfirmed: {},
     // QA queue (real open bugs) + generated-spec modal.
-    queue: [], queueLoading: false, queueLabel: 'bug', spec: null,
+    queue: [], queueLoading: false, queueLabel: 'bug', queueGroup: '', queueStatus: '', spec: null,
+  };
+  // Fleet engineering product groups (the #g-* labels) for the queue filter.
+  GROUPS = ['#g-software','#g-mdm','#g-orchestration','#g-security-compliance','#g-power-to-pc'];
+  // Status chip colors, keyed by Fleet's workflow status (from process labels).
+  STATUS_CHIP = {
+    'Release':{bg:'rgba(106,103,254,.16)',fg:'#8b89ff'},
+    'In QA':{bg:'rgba(61,182,123,.15)',fg:'#3db67b'},
+    'Product':{bg:'rgba(201,141,239,.16)',fg:'#c98def'},
+    'Reproduce':{bg:'rgba(235,188,67,.16)',fg:'#d6a32e'},
+    'Incoming':{bg:'rgba(139,143,162,.18)',fg:'#9ea2b5'},
+    'Triage':{bg:'rgba(139,143,162,.18)',fg:'#9ea2b5'},
   };
 
   componentDidMount(){
@@ -170,11 +181,15 @@ class Studio extends React.Component {
   goQueue = () => { this.setState({ view:'queue', targetOpen:false, modal:null }); this.loadQueue(); };
   loadQueue(){
     this.setState({ queueLoading:true });
-    fetch('/api/queue?label='+encodeURIComponent(this.state.queueLabel))
+    let url = '/api/queue?label='+encodeURIComponent(this.state.queueLabel);
+    if (this.state.queueGroup) url += '&group='+encodeURIComponent(this.state.queueGroup);
+    fetch(url)
       .then(r=>r.json())
       .then(d => this.setState({ queue:d.issues||[], queueLoading:false }))
       .catch(()=>this.setState({ queueLoading:false, toast:'Could not load the queue' }));
   }
+  setQueueGroup = (e) => this.setState({ queueGroup:e.target.value }, () => this.loadQueue()); // group filter is server-side
+  setQueueStatus = (e) => this.setState({ queueStatus:e.target.value });                       // status filter is client-side
   // ---- generated Playwright spec ----
   genSpec = (n) => {
     fetch('/api/spec', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ number:n }) })
@@ -521,7 +536,7 @@ class Studio extends React.Component {
       isDashboard:s.view==='dashboard', isNew:s.view==='new', isDetail:s.view==='detail', isQueue:s.view==='queue',
       crumb: s.view==='dashboard'?'Investigations':s.view==='new'?'New investigation':s.view==='queue'?'QA queue':(crumbNum?'#'+crumbNum:'Investigation'),
       navDashStyle:navBtn(s.view==='dashboard'), navNewStyle:navBtn(s.view==='new'), navQueueStyle:navBtn(s.view==='queue'),
-      queue:s.queue, queueLoading:s.queueLoading, queueLabel:s.queueLabel, spec:s.spec,
+      queue:s.queue, queueLoading:s.queueLoading, queueLabel:s.queueLabel, queueGroup:s.queueGroup, queueStatus:s.queueStatus, spec:s.spec,
       navRecent, investigations, stats, examples, targetOpen:s.targetOpen, live:s.live, agent:s.agent, liveActive,
       urlInput:s.urlInput, inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
       runLabel: s.running?'Running…':'Run remaining checks',
@@ -897,26 +912,44 @@ class Studio extends React.Component {
   }
 
   renderQueue(v){
+    const selStyle = S("height:34px; padding:0 10px; background:var(--surface); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:12.5px;");
+    // Status options = those present in the current results, plus All.
+    const statusesPresent = Array.from(new Set(v.queue.map(i=>i.status).filter(Boolean)));
+    const rows = v.queue.filter(i => !v.queueStatus || i.status===v.queueStatus);
     return (
       <div className="qa-fade" style={S("max-width:1080px; margin:0 auto; padding:32px;")}>
         <div style={S("display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:6px;")}>
           <h1 style={S("color:var(--text); font-size:24px; margin:0;")}>QA queue</h1>
-          <button onClick={()=>this.loadQueue()} style={S("height:32px; padding:0 14px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text2); font-size:12.5px;")}>Refresh</button>
+          <button onClick={()=>this.loadQueue()} style={S("height:34px; padding:0 14px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text2); font-size:12.5px;")}>Refresh</button>
         </div>
-        <p style={S("color:var(--text3); font-size:14px; margin:0 0 24px;")}>Open <b style={{color:'var(--text2)'}}>{v.queueLabel}</b> issues in fleetdm/fleet — pick one to investigate against the live build.</p>
+        <p style={S("color:var(--text3); font-size:14px; margin:0 0 16px;")}>Open <b style={{color:'var(--text2)'}}>bug</b> issues in fleetdm/fleet — pick one to investigate against the live build.</p>
+        <div style={S("display:flex; gap:10px; align-items:center; margin-bottom:18px; flex-wrap:wrap;")}>
+          <span style={S("color:var(--text3); font-size:12px;")}>Product group</span>
+          <select value={v.queueGroup} onChange={this.setQueueGroup} style={selStyle}>
+            <option value="">All groups</option>
+            {this.GROUPS.map(g => <option key={g} value={g}>{g}</option>)}
+          </select>
+          <span style={S("color:var(--text3); font-size:12px; margin-left:8px;")}>Status</span>
+          <select value={v.queueStatus} onChange={this.setQueueStatus} style={selStyle}>
+            <option value="">All statuses</option>
+            {statusesPresent.map(st => <option key={st} value={st}>{st}</option>)}
+          </select>
+          <span style={S("margin-left:auto; color:var(--text3); font-size:12px;")}>{rows.length} issue{rows.length===1?'':'s'}</span>
+        </div>
         {v.queueLoading && <div style={S("color:var(--text3); font-size:13px; padding:24px 0;")}>Loading…</div>}
         <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;")}>
-          {v.queue.map(item=>(
-            <div key={item.number} style={S("display:grid; grid-template-columns:64px minmax(0,1fr) 150px; gap:16px; align-items:center; padding:13px 20px; border-bottom:1px solid var(--border);")}>
+          {rows.map(item=>{ const c=this.STATUS_CHIP[item.status]||this.STATUS_CHIP['Triage']; return (
+            <div key={item.number} style={S("display:grid; grid-template-columns:64px minmax(0,1fr) 120px 150px; gap:16px; align-items:center; padding:13px 20px; border-bottom:1px solid var(--border);")}>
               <a href={"https://github.com/fleetdm/fleet/issues/"+item.number} target="_blank" rel="noopener" style={S("font-family:var(--font-mono); font-size:12.5px; color:var(--accent);")}>#{item.number}</a>
               <span style={S("min-width:0;")}>
                 <span style={S("display:block; color:var(--text); font-weight:600; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{item.title}</span>
                 <span style={S("display:block; color:var(--text3); font-size:11.5px; margin-top:2px;")}>{item.group||'—'} · reported by {item.reporter}</span>
               </span>
+              <span><span style={{display:'inline-flex',alignItems:'center',gap:'6px',padding:'4px 10px',borderRadius:'20px',fontSize:'11.5px',fontWeight:600,whiteSpace:'nowrap',background:c.bg,color:c.fg}}><span style={{width:'6px',height:'6px',borderRadius:'50%',background:c.fg}}/>{item.status}</span></span>
               <button onClick={()=>this.runLive(String(item.number))} style={S("justify-self:end; height:32px; padding:0 14px; background:var(--accent); color:#1a1c21; border:none; border-radius:6px; font-weight:600; font-size:12.5px;")}>Investigate</button>
             </div>
-          ))}
-          {!v.queueLoading && v.queue.length===0 && <div style={S("padding:30px; text-align:center; color:var(--text3); font-size:13px;")}>No open issues for this label.</div>}
+          );})}
+          {!v.queueLoading && rows.length===0 && <div style={S("padding:30px; text-align:center; color:var(--text3); font-size:13px;")}>No open issues match this filter.</div>}
         </div>
       </div>
     );
