@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet QA Studio</title>
+<script>window.__qaErr=null;window.addEventListener('error',function(e){if(!window.__qaErr)window.__qaErr=(e.message||String(e.error))+' @ '+(e.filename||'').split('/').pop()+':'+(e.lineno||'');});</script>
+<script src="./vendor/react.production.min.js"></script>
+<script src="./vendor/react-dom.production.min.js"></script>
+<script src="./vendor/babel.min.js"></script>
+<style>
+  :root{
+    --font-sans:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,sans-serif;
+    --font-mono:ui-monospace,"SF Mono","Roboto Mono",Menlo,Consolas,monospace;
+  }
+  html,body{margin:0;padding:0;height:100%;}
+  /* ---- design tokens (from the .dc.html helmet) ---- */
+  .qa{
+    --bg:#0d0f13; --surface:#1a1f27; --surface2:#242a33; --well:#14181f; --border:#333a45;
+    --text:#ffffff; --text2:#d6dae4; --text3:#969db0;
+    --accent:#6a67fe; --accent-over:#5d5ae7; --accent-tint:rgba(106,103,254,.15);
+    --green:#009a7d; --green-over:#00886c; --purple:#ae6ddf;
+    --danger:#ff5c83; --success:#3db67b; --warning:#ebbc43; --error:#d66c7b;
+    --code-bg:#11152b; --code-fg:#e8eaf0;
+  }
+  .qa.theme-light{
+    --bg:#f9fafc; --surface:#ffffff; --surface2:#f4f4f6; --well:#f4f4f6; --border:#e2e4ea;
+    --text:#192147; --text2:#515774; --text3:#8b8fa2;
+    --accent-tint:rgba(106,103,254,.10);
+    --code-bg:#192147; --code-fg:#e8eaf0;
+  }
+  .qa, .qa *{ box-sizing:border-box; }
+  .qa ::-webkit-scrollbar{ width:10px; height:10px; }
+  .qa ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:6px; }
+  .qa ::-webkit-scrollbar-track{ background:transparent; }
+  @keyframes qa-spin{ to{ transform:rotate(360deg); } }
+  @keyframes qa-fade{ from{ transform:translateY(5px); } to{ transform:none; } }
+  @keyframes qa-pulse{ 0%,100%{ opacity:1; } 50%{ opacity:.4; } }
+  .qa-spin{ animation:qa-spin 1s linear infinite; }
+  .qa-fade{ animation:qa-fade .25s ease; }
+  .qa textarea{ font-family:var(--font-mono); }
+  .qa button{ font-family:var(--font-sans); cursor:pointer; }
+  .qa a{ text-decoration:none; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="text/babel" data-presets="react">
+/** @jsxRuntime classic */
+const { useState, useEffect, useRef } = React;
+
+// CSS string -> React style object (keeps the design's inline styles verbatim).
+function S(str){
+  const o = {};
+  if (!str) return o;
+  str.split(';').forEach(rule => {
+    const i = rule.indexOf(':');
+    if (i < 0) return;
+    let k = rule.slice(0, i).trim();
+    const val = rule.slice(i + 1).trim();
+    if (!k) return;
+    k = k.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+    o[k] = val;
+  });
+  return o;
+}
+// tiny inline-SVG helper
+const Svg = ({d, w=16, h=16, fill='none', stroke='currentColor', sw=2, vb='0 0 24 24', style, children}) =>
+  <svg width={w} height={h} viewBox={vb} fill={fill} stroke={stroke} strokeWidth={sw}
+       strokeLinecap="round" strokeLinejoin="round" style={style}>
+    {d ? d.split('|').map((p,i)=><path key={i} d={p}/>) : children}
+  </svg>;
+
+const FleetLogo = ({size=26, white}) => (
+  <span style={{width:size,height:size,borderRadius:5,flex:'none',display:'grid',
+    gridTemplateColumns:'repeat(3,1fr)',gap:size*0.12,padding:size*0.18,
+    background: white ? '#192147' : 'linear-gradient(135deg,#009a7d,#6a67fe)'}}>
+    {[0,1,2,3,4,5,6,7,8].map(i=>(
+      <span key={i} style={{borderRadius:'50%',background:[0,2,4,6,8].includes(i)?'#fff':'rgba(255,255,255,.45)'}}/>
+    ))}
+  </span>
+);
+
+// ===================== APP LOGIC (ported from the .dc.html DCLogic) =====================
+class Studio extends React.Component {
+  state = {
+    theme: 'dark', view: 'dashboard', activeId: null, openSteps: {}, modal: null,
+    verdict: null, confirmed: {}, copied: false, targetOpen: false,
+    urlInput: 'https://github.com/fleetdm/fleet/issues/47712', toast: null, running: false, runTick: 0,
+  };
+
+  investigations = [
+    { number:47712, title:'Self-service: editing software on a team with no categories errors the Categories picker',
+      status:'Fixed', verdict:'Fixed', area:'#g-software', reporter:'rachelle-fleet', reportedVersion:'4.86.1', updated:'12m ago', confirmed:true, kindSet:'rich-fixed' },
+    { number:43310, title:'Switching between policies briefly displays previous policy content',
+      status:'Confirmed bug', verdict:'Confirmed bug', area:'#g-mdm', reporter:'noah-talerman', reportedVersion:'4.86.0', updated:'1h ago', confirmed:true, kindSet:'rich-flash' },
+    { number:46920, title:'Dark mode: settings nav background desyncs from table on theme toggle',
+      status:'Not a bug', verdict:'Not a bug', area:'#g-mdm', reporter:'jacob-shandling', reportedVersion:'4.85.3', updated:'4h ago', confirmed:true, kindSet:'rich-desync' },
+    { number:47655, title:'macOS host shows "Pending" MDM status after successful enrollment',
+      status:'In progress', verdict:'Confirmed bug', area:'#g-mdm', reporter:'george-karr', reportedVersion:'4.86.1', updated:'2h ago', confirmed:false, kindSet:'light' },
+    { number:47301, title:'Query results CSV export drops the last row when over 1000 hosts',
+      status:'Cannot reproduce', verdict:'Cannot reproduce', area:'#g-orchestration', reporter:'lucas-manuel', reportedVersion:'4.84.0', updated:'yesterday', confirmed:true, kindSet:'light' },
+    { number:47488, title:'Bulk-delete hosts confirm modal closes without deleting on Firefox',
+      status:'In progress', verdict:'Confirmed bug', area:'#g-orchestration', reporter:'sgress454', reportedVersion:'4.86.1', updated:'3h ago', confirmed:false, kindSet:'light' },
+  ];
+  CHIP = {
+    'Fixed':{bg:'rgba(61,182,123,.15)',fg:'#3db67b'},
+    'Confirmed bug':{bg:'rgba(255,92,131,.15)',fg:'#ff5c83'},
+    'Not a bug':{bg:'rgba(139,143,162,.18)',fg:'#9ea2b5'},
+    'In progress':{bg:'rgba(106,103,254,.16)',fg:'#6a67fe'},
+    'Cannot reproduce':{bg:'rgba(235,188,67,.16)',fg:'#d6a32e'},
+  };
+  VERDICTS = ['Fixed','Confirmed bug','Not a bug','Cannot reproduce'];
+
+  invByNumber(n){ return this.investigations.find(i => i.number === n); }
+  get active(){ return this.invByNumber(this.state.activeId); }
+
+  goDashboard = () => this.setState({ view:'dashboard', targetOpen:false, modal:null });
+  goNew = () => this.setState({ view:'new', targetOpen:false, modal:null });
+  toggleTheme = () => this.setState(s => ({ theme: s.theme==='dark'?'light':'dark' }));
+  toggleTarget = () => this.setState(s => ({ targetOpen: !s.targetOpen }));
+  closeModal = () => this.setState({ modal:null });
+  stop = (e) => e.stopPropagation();
+
+  openInv = (n) => {
+    const inv = this.invByNumber(n); const light = inv.kindSet === 'light';
+    this.setState({ view:'detail', activeId:n, targetOpen:false, modal:null, verdict:inv.verdict,
+      openSteps: light ? {issue:true} : {issue:true,reproduce:true,rootcause:true,buildcheck:true},
+      running:false, runTick: light ? 2 : 99 });
+  };
+  runFromInput = () => {
+    const m = (this.state.urlInput||'').match(/(\d{4,6})/);
+    const n = m ? parseInt(m[1],10) : 47712;
+    this.openInv(this.invByNumber(n) ? n : 47712);
+  };
+  onUrlInput = (e) => this.setState({ urlInput: e.target.value });
+  toggleStep = (k) => this.setState(s => ({ openSteps:{...s.openSteps,[k]:!s.openSteps[k]} }));
+  expandAll = () => { const o={}; this.stepKinds().forEach(k=>o[k]=true); this.setState({openSteps:o}); };
+  collapseAll = () => this.setState({ openSteps:{} });
+  stepKinds(){ return ['issue','target','reproduce','rootcause','buildcheck','verdict','draft']; }
+  selectVerdict = (v) => this.setState(s => ({ verdict:v, confirmed:{...s.confirmed,[s.activeId]:false} }));
+  confirmVerdict = () => { this.setState(s => ({ confirmed:{...s.confirmed,[s.activeId]:true}, toast:'Verdict confirmed' })); this.flashToast(); };
+  copyComment = () => {
+    try { navigator.clipboard && navigator.clipboard.writeText(this.qaComment()); } catch(e){}
+    this.setState({ copied:true, toast:'QA comment copied' }); this.flashToast();
+    setTimeout(()=>this.setState({copied:false}),1600);
+  };
+  openDraft = () => this.setState({ modal:'draft' });
+  confirmSubmit = () => { this.setState({ modal:null, toast:'Opened prefilled issue in GitHub (nothing posted)' }); this.flashToast(); };
+  flashToast(){ clearTimeout(this._tt); this._tt = setTimeout(()=>this.setState({toast:null}),2200); }
+  runRemaining = () => {
+    if (this.state.running) return;
+    this.setState({ running:true }); let tick = 2;
+    this._ri = setInterval(()=>{ tick+=1; this.setState({runTick:tick}); if(tick>=7){clearInterval(this._ri); this.setState({running:false});} },650);
+  };
+  componentWillUnmount(){ clearInterval(this._ri); clearTimeout(this._tt); }
+
+  buildSteps(inv){
+    if (inv.kindSet==='rich-fixed') return this.stepsFixed();
+    if (inv.kindSet==='rich-flash') return this.stepsFlash();
+    if (inv.kindSet==='rich-desync') return this.stepsDesync();
+    return this.stepsLight(inv);
+  }
+  diff(lines){
+    const STYLE={ add:{background:'rgba(61,182,123,.14)',color:'#86e3b0'}, del:{background:'rgba(255,92,131,.13)',color:'#ff9bb1'}, ctx:{color:'#9aa0b4'}, meta:{color:'#6a67fe'} };
+    const PRE={ add:'+', del:'-', ctx:' ', meta:'' };
+    return lines.map(l => ({ text:l.x, prefix:PRE[l.t], rowStyle:STYLE[l.t] }));
+  }
+  chart(series, frames, flash){
+    const W=640,H=168,x0=40,y0=10,y1=140,n=frames;
+    const out = series.map(s => ({ name:s.name, color:s.color,
+      points: s.vals.map((v,i)=>`${(x0+i*(W-x0-10)/(n-1)).toFixed(1)},${(y1-v*(y1-y0)).toFixed(1)}`).join(' ') }));
+    let f=null;
+    if (flash){ const px=i=>x0+i*(W-x0-10)/(n-1); f={ x:px(flash.a).toFixed(1), w:(px(flash.b)-px(flash.a)).toFixed(1), tx:(px(flash.a)+4).toFixed(1), label:flash.label }; }
+    return { series:out, flash:f, lastFrame:frames-1 };
+  }
+  stepsFixed(){ return [
+    { kind:'issue', title:'Fetch issue', tool:'github.issue', summary:'self-service categories picker crashes on teams with no categories',
+      issueBody:'On a team that has zero software categories configured, opening the Edit dialog for a self-service software title throws in the Categories picker. The dropdown never renders and the page surfaces a JS error.',
+      repro:['Go to Software → select a team with no categories','Open a self-service title → Edit','Observe: Categories picker crashes — TypeError: categories is not iterable'],
+      labels:['bug','#g-software','reproduced','~release-blocker'] },
+    { kind:'target', title:'Resolve target', tool:'whoami', summary:'dogfood.fleetdm.com · 4.87.0-rc · rev 9c17a71c43',
+      fields:[{k:'Instance',v:'dogfood.fleetdm.com'},{k:'Tier',v:'Premium'},{k:'Deployed version',v:'4.87.0-rc.2606171916'},{k:'Git revision',v:'9c17a71c43'}],
+      caveat:'Deployed rev is an RC build cut from release-4.87 — newer than the reported 4.86.1.' },
+    { kind:'reproduce', sub:'api', title:'Reproduce in live browser', tool:'browser + API', summary:'API returns [] not null; empty-state renders; no exception',
+      api:{ method:'GET', path:'/api/latest/fleet/software/titles?team_id=14&available_for_install=true', status:200, body:'{\n  "software_titles": [ … 12 items ],\n  "categories": [],\n  "count": 12\n}' },
+      apiNote:'API now returns "categories": [] (previously null). The picker receives an array and renders its empty-state instead of throwing.',
+      shots:[{label:'Edit dialog — empty categories state', mock:'self-service · no categories', tint:'#6a67fe'},{label:'Console — 0 errors', mock:'no TypeError thrown', tint:'#3db67b'}],
+      domMeasure:'.category-picker__empty present · 0 console errors · picker height 96px',
+      caveat:'Headless Chromium 126 — visual confirmed, but verify spacing in a real browser.' },
+    { kind:'rootcause', title:'Root cause at deployed rev', tool:'code @ rev', summary:'guarded null categories — fixed in PR #47690',
+      file:'frontend/pages/SoftwarePage/.../SoftwareCategoriesPicker.tsx', fileRev:'9c17a71c43',
+      diff:this.diff([
+        {t:'meta',x:'SoftwareCategoriesPicker.tsx @ 9c17a71c43'},
+        {t:'ctx',x:'const { data } = useSoftwareCategories(teamId);'},
+        {t:'del',x:'const categories = data.categories;'},
+        {t:'add',x:'const categories = data.categories ?? [];'},
+        {t:'ctx',x:'return ('},
+        {t:'ctx',x:'  <Dropdown>'},
+        {t:'del',x:'    {categories.map((c) => ('},
+        {t:'add',x:'    {categories.length === 0 ? <EmptyState /> :'},
+        {t:'add',x:'      categories.map((c) => ('},
+        {t:'ctx',x:'        <Option key={c.id}>{c.name}</Option>'},
+        {t:'ctx',x:'    ))}'} ]),
+      grep:'rg "data.categories" frontend/pages/SoftwarePage → 1 match (guarded)',
+      found:'Introduced by PR #47690 "guard null categories from API" — commit e4f1d2a. This is the fix, not the bug.' },
+    { kind:'buildcheck', title:'Build check', tool:'is-in-build', summary:'fix commit e4f1d2a is in the running build',
+      question:'Is fix PR #47690 (commit e4f1d2a) present in 4.87.0-rc.2606171916 @ 9c17a71c43?',
+      answer:true, answerBadge:'YES', answerHeadline:'Fix is in the deployed build',
+      detail:'e4f1d2a is an ancestor of 9c17a71c43; also cherry-picked to release-4.87 as 7b2c901.',
+      rows:[{k:'PR #47690',v:'merged to main',ok:true},{k:'commit e4f1d2a',v:'ancestor of deployed rev',ok:true},{k:'cherry-pick 7b2c901',v:'in release-4.87',ok:true}] },
+    { kind:'verdict', title:'Verdict', tool:'verdict', summary:'proposed: Fixed' },
+    { kind:'draft', title:'Draft issue', tool:'build issue', summary:'prefilled QA verification comment' },
+  ]; }
+  stepsFlash(){
+    const c=this.chart([
+      {name:'previous policy content opacity', color:'var(--danger)', vals:[1,1,1,.95,.6,.25,.05,0,0,0,0,0,0,0,0,0]},
+      {name:'new policy content opacity', color:'var(--accent)', vals:[0,0,0,0,.05,.2,.45,.7,.88,.97,1,1,1,1,1,1]},
+    ],16,{a:0,b:4,label:'flash 0–66ms'});
+    return [
+    { kind:'issue', title:'Fetch issue', tool:'github.issue', summary:'previous policy content flashes when switching policies',
+      issueBody:"When switching from one policy to another, the previous policy's body content stays painted for a moment before the new policy hydrates — a brief but visible flash of stale content.",
+      repro:['Open Policies → select policy A','Click policy B in the list',"Observe: policy A's description flashes for a few frames before B renders"],
+      labels:['bug','#g-mdm','reproduced','visual'] },
+    { kind:'target', title:'Resolve target', tool:'whoami', summary:'dogfood.fleetdm.com · 4.87.0-rc · rev 9c17a71c43',
+      fields:[{k:'Instance',v:'dogfood.fleetdm.com'},{k:'Tier',v:'Premium'},{k:'Deployed version',v:'4.87.0-rc.2606171916'},{k:'Git revision',v:'9c17a71c43'}],
+      caveat:'Timing bug — measured against this exact rev; flash duration may vary with network latency.' },
+    { kind:'reproduce', sub:'sampler', title:'Reproduce with frame sampler', tool:'frame sampler', summary:'stale content visible ~3 frames (≈50ms) after switch',
+      samplerMeta:'16 frames @ 60fps', trigger:'Click "macOS — require FileVault" → "Windows — disk encryption"',
+      series:c.series, flash:c.flash, lastFrame:c.lastFrame,
+      samplerNote:'Previous policy body stays painted for ~3 frames (≈50ms) after the route change before the new policy hydrates — confirmed visible flash of stale content.',
+      verdictTone:'bad', caveat:'Headless capture at 60fps — confirm the perceived flash on a 120Hz display.' },
+    { kind:'rootcause', title:'Root cause at deployed rev', tool:'code @ rev', summary:'PolicyForm renders stale prop before effect resets it',
+      file:'frontend/pages/policies/PolicyPage/PolicyForm/PolicyForm.tsx', fileRev:'9c17a71c43',
+      diff:this.diff([
+        {t:'meta',x:'PolicyForm.tsx @ 9c17a71c43'},
+        {t:'ctx',x:'const PolicyForm = ({ policy }: Props) => {'},
+        {t:'del',x:'  // renders before policyId change resets local state'},
+        {t:'ctx',x:'  const [body, setBody] = useState(policy.body);'},
+        {t:'ctx',x:'  useEffect(() => setBody(policy.body), [policy.id]);'},
+        {t:'ctx',x:'  return <Editor value={body} />;'},
+        {t:'add',x:'  // fix: key the subtree on policy.id so React remounts'},
+        {t:'add',x:'  // <PolicyForm key={policy.id} ... />  ← not applied in build'} ]),
+      grep:'rg "key={policy" frontend/pages/policies → 0 matches (no remount key)',
+      found:'No fix commit present. Candidate PR #47731 (add remount key) is open but not merged.' },
+    { kind:'buildcheck', title:'Build check', tool:'is-in-build', summary:'no fix commit in the running build',
+      question:'Is any fix for the policy-switch flash present in 4.87.0-rc.2606171916 @ 9c17a71c43?',
+      answer:false, answerBadge:'NO', answerHeadline:'No fix in the deployed build',
+      detail:'Candidate PR #47731 is open; no merged commit addressing the remount key is reachable from 9c17a71c43.',
+      rows:[{k:'PR #47731',v:'open — not merged',ok:false},{k:'remount key commit',v:'not found in build',ok:false},{k:'reproduces on deployed rev',v:'confirmed',ok:true}] },
+    { kind:'verdict', title:'Verdict', tool:'verdict', summary:'proposed: Confirmed bug' },
+    { kind:'draft', title:'Draft issue', tool:'build issue', summary:'prefilled bug report with frame samples' },
+  ]; }
+  stepsDesync(){
+    const c=this.chart([
+      {name:'nav background luminance', color:'var(--accent)', vals:[.12,.12,.14,.2,.32,.46,.6,.72,.82,.9,.95,.98,1,1,1,1]},
+      {name:'table background luminance', color:'var(--success)', vals:[.12,.12,.14,.21,.32,.45,.6,.72,.82,.9,.95,.98,1,1,1,1]},
+    ],16);
+    return [
+    { kind:'issue', title:'Fetch issue', tool:'github.issue', summary:'reported nav/table background desync on theme toggle',
+      issueBody:'Reporter believes the settings nav background lags behind the table background during the dark→light theme transition, causing a momentary mismatch.',
+      repro:['Open Settings','Toggle the theme','Observe (reported): nav appears to change color a beat after the table'],
+      labels:['bug','#g-mdm','needs-repro','dark-mode'] },
+    { kind:'target', title:'Resolve target', tool:'whoami', summary:'dogfood.fleetdm.com · 4.87.0-rc · rev 9c17a71c43',
+      fields:[{k:'Instance',v:'dogfood.fleetdm.com'},{k:'Tier',v:'Premium'},{k:'Deployed version',v:'4.87.0-rc.2606171916'},{k:'Git revision',v:'9c17a71c43'}],
+      caveat:'Visual/timing claim — sampled per frame against this exact rev.' },
+    { kind:'reproduce', sub:'sampler', title:'Reproduce with frame sampler', tool:'frame sampler', summary:'nav and table interpolate in lockstep — no desync',
+      samplerMeta:'16 frames @ 60fps · 300ms transition', trigger:'Toggle theme dark → light on Settings',
+      series:c.series, flash:null, lastFrame:c.lastFrame,
+      samplerNote:'Nav and table background-color interpolate in lockstep across the 300ms transition — the two sampled values never diverge by more than 0.4%. No desync.',
+      verdictTone:'good', caveat:'Headless capture — both backgrounds share the same CSS variable and transition; visually verify once on a real display.' },
+    { kind:'rootcause', title:'Root cause at deployed rev', tool:'code @ rev', summary:'both surfaces driven by one --bg variable + one transition',
+      file:'frontend/styles/global/_global.scss', fileRev:'9c17a71c43',
+      diff:this.diff([
+        {t:'meta',x:'_global.scss @ 9c17a71c43'},
+        {t:'ctx',x:'.site-nav, .data-table {'},
+        {t:'ctx',x:'  background: var(--bg-surface);'},
+        {t:'ctx',x:'  transition: background 300ms ease-in-out;'},
+        {t:'ctx',x:'}'},
+        {t:'meta',x:'// single token + single transition → no possible desync'} ]),
+      grep:'rg "var(--bg-surface)" frontend/styles → nav and table share one token',
+      found:'Both surfaces read the same token and share one transition curve. There is no mechanism for a desync.' },
+    { kind:'buildcheck', title:'Build check', tool:'is-in-build', summary:'n/a — no defect to fix',
+      question:'Is there a defect to check against the build?',
+      answer:true, answerBadge:'N/A', answerHeadline:'No defect — nothing to fix',
+      detail:'Behavior matches the source. Reported desync is not present in the deployed build.',
+      rows:[{k:'shared --bg-surface token',v:'confirmed',ok:true},{k:'shared 300ms transition',v:'confirmed',ok:true},{k:'measured divergence',v:'< 0.4%',ok:true}] },
+    { kind:'verdict', title:'Verdict', tool:'verdict', summary:'proposed: Not a bug' },
+    { kind:'draft', title:'Draft comment', tool:'build issue', summary:'prefilled close comment with frame samples' },
+  ]; }
+  stepsLight(inv){
+    const done = this.state.runTick;
+    const mk = (kind, idx, title, tool, summary, donesummary) => {
+      const isDone = idx <= done;
+      return { kind, title, tool, summary:isDone?donesummary:summary, _lightDone:isDone, lightBody:true };
+    };
+    const confirmedBug = inv.verdict === 'Confirmed bug';
+    return [
+      { kind:'issue', title:'Fetch issue', tool:'github.issue', summary:inv.title.toLowerCase(),
+        issueBody:'Reported by '+inv.reporter+' on Fleet '+inv.reportedVersion+'. Investigation gathers evidence against the live deployed build before a verdict is set.',
+        repro:['See reported steps in the GitHub issue','Run remaining checks to reproduce against the deployed build'],
+        labels:['bug',inv.area,'needs-repro'] },
+      { kind:'target', title:'Resolve target', tool:'whoami', summary:'dogfood.fleetdm.com · 4.87.0-rc · rev 9c17a71c43',
+        fields:[{k:'Instance',v:'dogfood.fleetdm.com'},{k:'Tier',v:'Premium'},{k:'Deployed version',v:'4.87.0-rc.2606171916'},{k:'Git revision',v:'9c17a71c43'}],
+        caveat:'Pinned to the deployed RC build for every read.' },
+      mk('reproduce',3,'Reproduce in live browser','browser + API','queued — run to gather evidence','reproduced against deployed build'),
+      mk('rootcause',4,'Root cause at deployed rev','code @ rev','queued','located relevant source at rev 9c17a71c'),
+      mk('buildcheck',5,'Build check','is-in-build','queued', confirmedBug ? 'no fix commit in build' : 'no matching code path in build'),
+      mk('verdict',6,'Verdict','verdict','queued','proposed: '+inv.verdict),
+      mk('draft',7,'Draft issue','build issue','queued','prefilled report ready'),
+    ];
+  }
+  qaComment(){
+    const inv = this.active; if (!inv) return '';
+    if (inv.kindSet==='rich-fixed') return 'Verdict: FIXED on 4.87.0-rc.2606171916 (rev 9c17a71c43, Premium).\n\nEvidence:\n• API GET /software/titles now returns "categories": [] (was null).\n• Edit dialog renders the empty-state; 0 console errors.\n• Fix PR #47690 (commit e4f1d2a) is in the deployed build.\n\nClosing as fixed — verified against the live deployed build.';
+    if (inv.kindSet==='rich-flash') return 'Verdict: CONFIRMED BUG on 4.87.0-rc.2606171916 (rev 9c17a71c43).\n\nEvidence:\n• Frame sampler: previous policy content stays painted ~3 frames (≈50ms) after switch.\n• Root cause: PolicyForm renders stale prop before effect resets (no remount key).\n• Build check: no fix in build; PR #47731 still open.\n\nReproduces reliably. Recommend release-blocker triage.';
+    if (inv.kindSet==='rich-desync') return 'Verdict: NOT A BUG on 4.87.0-rc.2606171916 (rev 9c17a71c43).\n\nEvidence:\n• Frame sampler: nav and table backgrounds interpolate in lockstep (divergence < 0.4%).\n• Both surfaces share one --bg-surface token and one 300ms transition.\n\nNo desync present in the deployed build. Closing.';
+    return 'Verdict: '+inv.verdict+' — pending. Run the remaining checks to attach evidence (reproduce, root cause, build check) before confirming.';
+  }
+  draft(){
+    const inv = this.active; if (!inv) return { title:'', body:'', labels:[] };
+    return {
+      title:'[QA] '+inv.title,
+      body:'### Fleet version\n4.87.0-rc.2606171916 (rev 9c17a71c43, Premium) — dogfood.fleetdm.com\n\n### What happened\n'+this.qaComment()+'\n\n### Evidence attached\n- Live API response\n- Browser screenshots / frame samples\n- Source at deployed revision\n- Build-check result\n\n_Drafted by Fleet QA Studio — review before submitting._',
+      labels:['bug', inv.area, inv.verdict==='Confirmed bug' ? '~release-blocker' : 'qa-verified'],
+    };
+  }
+
+  renderVals(){
+    const s = this.state;
+    const isDark = s.theme === 'dark';
+    const navBtn = (active) => ({ display:'flex',alignItems:'center',gap:'10px',width:'100%',textAlign:'left',height:'38px',padding:'0 12px',borderRadius:'6px',border:'none',fontSize:'13.5px',fontWeight:600, background:active?'var(--accent-tint)':'transparent', color:active?'var(--accent)':'var(--text2)' });
+    const chipFor = (st) => this.CHIP[st] || this.CHIP['In progress'];
+    const investigations = this.investigations.map(i => { const c=chipFor(i.status); return { ...i, chipBg:c.bg, chipFg:c.fg, evidenceCount:7, onOpen:()=>this.openInv(i.number), hoverIn:(e)=>{e.currentTarget.style.background='var(--surface2)';}, hoverOut:(e)=>{e.currentTarget.style.background='transparent';} }; });
+    const navRecent = this.investigations.slice(0,5).map(i => { const c=chipFor(i.status); const active=s.view==='detail'&&s.activeId===i.number; return { number:i.number, dot:c.fg, shortStatus:i.status==='Confirmed bug'?'bug':i.status.split(' ')[0], onOpen:()=>this.openInv(i.number), navStyle:{display:'flex',alignItems:'center',gap:'8px',width:'100%',textAlign:'left',height:'32px',padding:'0 8px',borderRadius:'6px',border:'none',background:active?'var(--surface2)':'transparent',color:active?'var(--text)':'var(--text2)',fontSize:'12.5px',fontWeight:600} }; });
+    const stats = [
+      { value:this.investigations.filter(i=>i.status==='In progress').length, label:'In progress', color:'#6a67fe' },
+      { value:this.investigations.filter(i=>i.status==='Confirmed bug').length, label:'Confirmed bugs', color:'#ff5c83' },
+      { value:this.investigations.filter(i=>i.status==='Fixed').length, label:'Verified fixed', color:'#3db67b' },
+      { value:this.investigations.filter(i=>i.status==='Not a bug'||i.status==='Cannot reproduce').length, label:'Closed / no-repro', color:'#8b8fa2' },
+    ];
+    const examples = [
+      { number:47712, title:'Self-service categories picker errors on empty teams', hint:'verdict ends up FIXED — code diff + build check', onRun:()=>this.openInv(47712) },
+      { number:43310, title:'Policy switch flashes previous content', hint:'timing bug — shows the frame sampler', onRun:()=>this.openInv(43310) },
+      { number:46920, title:'Dark-mode nav/table background desync', hint:'frame sampler proves lockstep — NOT A BUG', onRun:()=>this.openInv(46920) },
+    ];
+    const inv = this.active;
+    let steps = [], invChip = {bg:'',fg:''}, hasQueued = false;
+    if (inv){
+      invChip = chipFor(inv.status);
+      const raw = this.buildSteps(inv); const light = inv.kindSet==='light';
+      steps = raw.map((st, idx) => {
+        const num = idx+1; const open = !!s.openSteps[st.kind];
+        let state='done';
+        if (light){ if (st._lightDone===false) state = (s.running && num===s.runTick+1) ? 'running' : 'queued'; }
+        const sub=st.sub; const toneGood = st.verdictTone==='good';
+        return { ...st, idx:num, _open:open, _done:state==='done', _running:state==='running', _queued:state==='queued',
+          onToggle:()=>this.toggleStep(st.kind), chevronStyle:{transform:open?'rotate(180deg)':'none'},
+          nodeStyle:{width:'28px',height:'28px',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',flex:'none',border:'2px solid',borderColor: state==='queued'?'var(--border)':((toneGood||(st.kind==='buildcheck'&&st.answer))?'var(--success)':'var(--accent)'), background: state==='done'?(toneGood?'var(--success)':'var(--accent)'):'var(--surface)', color: state==='done'?'#fff':(state==='queued'?'var(--text3)':'var(--accent)')},
+          connectorStyle:{width:'2px',flex:1,minHeight:'8px',background:'var(--border)',marginTop:'2px',marginBottom:'2px'},
+          _isIssue:st.kind==='issue', _isTarget:st.kind==='target', _isReproApi:st.kind==='reproduce'&&sub==='api', _isSampler:st.kind==='reproduce'&&sub==='sampler',
+          _isRoot:st.kind==='rootcause'&&!st.lightBody, _isBuild:st.kind==='buildcheck'&&!st.lightBody, _isVerdict:st.kind==='verdict'&&!st.lightBody, _isDraft:st.kind==='draft'&&!st.lightBody,
+          verdictNoteStyle: toneGood?{background:'rgba(61,182,123,.10)',border:'1px solid rgba(61,182,123,.3)'}:{background:'rgba(255,92,131,.10)',border:'1px solid rgba(255,92,131,.3)'},
+          verdictNoteIcon: toneGood ? <Svg w={15} h={15} stroke="var(--success)" sw={2.4} d="M20 6 9 17l-5-5"/> : <Svg w={15} h={15} stroke="var(--danger)" sw={2.2} d="M12 9v4M12 17h.01|M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>,
+          shots: (st.shots||[]).map(sh=>({...sh, thumbStyle:{height:'92px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'11px',color:'#fff',fontFamily:'var(--font-mono)',textAlign:'center',padding:'0 8px',background:'linear-gradient(135deg, '+sh.tint+'33, '+sh.tint+'11)',borderBottom:'1px solid var(--border)'}})),
+          rows: (st.rows||[]).map(r=>({...r, bad:!r.ok, iconStyle:{width:'18px',height:'18px',borderRadius:'50%',flex:'none',display:'flex',alignItems:'center',justifyContent:'center',background:r.ok?'var(--success)':'var(--danger)',color:'#fff'}})),
+          answerBoxStyle: st.answer?{background:'rgba(61,182,123,.10)',border:'1px solid rgba(61,182,123,.3)'}:{background:'rgba(255,92,131,.10)',border:'1px solid rgba(255,92,131,.3)'},
+          answerBadgeStyle:{fontFamily:'var(--font-mono)',fontWeight:700,fontSize:'14px',padding:'6px 12px',borderRadius:'6px',flex:'none',background:st.answer?'var(--success)':'var(--danger)',color:'#fff'},
+        };
+      });
+      hasQueued = light && s.runTick < 7;
+    }
+    const verdictConfirmed = inv ? (s.confirmed[inv.number]!==undefined ? s.confirmed[inv.number] : inv.confirmed) : false;
+    const selected = s.verdict || (inv && inv.verdict);
+    const verdictOptions = this.VERDICTS.map(v => { const c=chipFor(v); const sel=v===selected; return { label:v, color:c.fg, ring:sel?c.fg:'var(--border)', selected:sel, isProposed:inv&&v===inv.verdict, onSelect:()=>this.selectVerdict(v), optStyle:{display:'flex',alignItems:'center',gap:'10px',width:'100%',textAlign:'left',padding:'10px 12px',borderRadius:'7px',cursor:'pointer',background:sel?'var(--accent-tint)':'var(--well)',border:sel?'1px solid var(--accent)':'1px solid var(--border)'} }; });
+    const d = this.draft();
+    return {
+      themeClass:isDark?'':'theme-light', isDark, isLight:!isDark,
+      isDashboard:s.view==='dashboard', isNew:s.view==='new', isDetail:s.view==='detail',
+      crumb: s.view==='dashboard'?'Investigations':s.view==='new'?'New investigation':(inv?'#'+inv.number:'Investigation'),
+      navDashStyle:navBtn(s.view==='dashboard'), navNewStyle:navBtn(s.view==='new'),
+      navRecent, investigations, stats, examples, targetOpen:s.targetOpen,
+      urlInput:s.urlInput, inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
+      runLabel: s.running?'Running…':'Run remaining checks',
+      verdictOptions, verdictConfirmed, verdictUnconfirmed:!verdictConfirmed, confirmedBy:'Quinn Avery',
+      qaComment:this.qaComment(), copyLabel:s.copied?'Copied':'Copy',
+      draftOpen:s.modal==='draft', draftTitle:d.title, draftBody:d.body, draftLabels:d.labels, toast:s.toast,
+    };
+  }
+
+  render(){
+    const v = this.renderVals();
+    return (
+      <div className={"qa "+v.themeClass} style={S("display:flex; height:100vh; width:100%; overflow:hidden; background:var(--bg); color:var(--text2); font-family:var(--font-sans); font-size:14px;")}>
+        {/* SIDEBAR */}
+        <aside style={S("width:230px; flex:none; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column;")}>
+          <div style={S("height:60px; flex:none; display:flex; align-items:center; gap:10px; padding:0 18px; border-bottom:1px solid var(--border);")}>
+            <FleetLogo size={26}/>
+            <div style={S("display:flex; flex-direction:column; line-height:1.15;")}>
+              <span style={S("color:var(--text); font-weight:600; font-size:14px;")}>QA Studio</span>
+              <span style={S("color:var(--text3); font-size:10.5px; letter-spacing:.04em; text-transform:uppercase;")}>Fleet</span>
+            </div>
+          </div>
+          <nav style={S("padding:14px 12px; display:flex; flex-direction:column; gap:2px;")}>
+            <button onClick={this.goDashboard} style={v.navDashStyle}>
+              <Svg d="" ><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></Svg> Dashboard
+            </button>
+            <button onClick={this.goNew} style={v.navNewStyle}>
+              <Svg><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></Svg> New investigation
+            </button>
+          </nav>
+          <div style={S("padding:6px 18px 8px; color:var(--text3); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase;")}>Recent</div>
+          <div style={S("flex:1; overflow:auto; padding:0 10px 10px; display:flex; flex-direction:column; gap:1px;")}>
+            {v.navRecent.map(r => (
+              <button key={r.number} onClick={r.onOpen} style={r.navStyle}>
+                <span style={{width:'7px',height:'7px',borderRadius:'50%',flex:'none',background:r.dot}}/>
+                <span style={S("overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-variant-numeric:tabular-nums;")}>#{r.number}</span>
+                <span style={S("margin-left:auto; color:var(--text3); font-size:11px; flex:none;")}>{r.shortStatus}</span>
+              </button>
+            ))}
+          </div>
+          <div style={S("padding:12px; border-top:1px solid var(--border); display:flex; align-items:center; gap:10px;")}>
+            <div style={S("width:30px; height:30px; border-radius:50%; background:var(--accent-tint); color:var(--accent); display:flex; align-items:center; justify-content:center; font-weight:600; font-size:12px; flex:none;")}>QA</div>
+            <div style={S("line-height:1.2; min-width:0;")}>
+              <div style={S("color:var(--text); font-weight:600; font-size:12.5px;")}>Quinn Avery</div>
+              <div style={S("color:var(--text3); font-size:11px;")}>QA engineer</div>
+            </div>
+            <button onClick={this.toggleTheme} title="Toggle theme" style={S("margin-left:auto; width:30px; height:30px; flex:none; border:1px solid var(--border); background:transparent; color:var(--text2); border-radius:6px; display:flex; align-items:center; justify-content:center;")}>
+              {v.isDark
+                ? <Svg w={15} h={15}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></Svg>
+                : <Svg w={15} h={15} d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>}
+            </button>
+          </div>
+        </aside>
+
+        {/* MAIN */}
+        <div style={S("flex:1; min-width:0; display:flex; flex-direction:column;")}>
+          <header style={S("height:60px; flex:none; border-bottom:1px solid var(--border); background:var(--surface); display:flex; align-items:center; padding:0 24px; gap:16px;")}>
+            <div style={S("display:flex; align-items:center; gap:8px; min-width:0; color:var(--text3); font-size:13px;")}>
+              <span>Fleet QA Studio</span><span>/</span>
+              <span style={S("color:var(--text); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{v.crumb}</span>
+            </div>
+            <div style={S("margin-left:auto; position:relative;")}>
+              <button onClick={this.toggleTarget} style={S("display:flex; align-items:center; gap:10px; height:38px; padding:0 12px; border:1px solid var(--border); background:var(--bg); border-radius:8px; color:var(--text2);")}>
+                <span style={S("position:relative; width:8px; height:8px; flex:none;")}><span style={S("position:absolute; inset:0; border-radius:50%; background:var(--success);")}/><span style={S("position:absolute; inset:-3px; border-radius:50%; border:1px solid var(--success); opacity:.4;")} className="qa-spin"/></span>
+                <span style={S("display:flex; flex-direction:column; align-items:flex-start; line-height:1.15;")}>
+                  <span style={S("font-size:11px; color:var(--text3);")}>dogfood.fleetdm.com</span>
+                  <span style={S("font-family:var(--font-mono); font-size:11.5px; color:var(--text);")}>4.87.0-rc · 9c17a71c</span>
+                </span>
+                <span style={S("background:var(--accent-tint); color:var(--accent); font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px; letter-spacing:.03em;")}>PREMIUM</span>
+                <Svg w={14} h={14} style={S("color:var(--text3);")} d="m6 9 6 6 6-6"/>
+              </button>
+              {v.targetOpen && (
+                <div className="qa-fade" style={S("position:absolute; right:0; top:46px; width:340px; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.28); padding:16px; z-index:40;")}>
+                  <div style={S("display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;")}>
+                    <span style={S("color:var(--text); font-weight:600; font-size:13px;")}>Target instance</span>
+                    <span style={S("display:flex; align-items:center; gap:6px; color:var(--success); font-size:11.5px; font-weight:600;")}><span style={S("width:7px; height:7px; border-radius:50%; background:var(--success);")}/>Connected</span>
+                  </div>
+                  <div style={S("display:flex; flex-direction:column; gap:10px; font-size:12.5px;")}>
+                    {[['Instance','dogfood.fleetdm.com'],['Tier','Premium'],['Deployed version','4.87.0-rc.2606171916'],['Git revision','9c17a71c43'],['Built','Jun 17, 2026 19:16 UTC']].map(([k,val])=>(
+                      <div key={k} style={S("display:flex; justify-content:space-between; gap:12px;")}><span style={S("color:var(--text3);")}>{k}</span><span style={{color: k==='Git revision'?'var(--accent)':'var(--text)', fontFamily: (k==='Instance'||k.includes('version')||k==='Git revision')?'var(--font-mono)':'inherit'}}>{val}</span></div>
+                    ))}
+                  </div>
+                  <div style={S("margin-top:12px; padding:10px; background:var(--well); border-radius:6px; display:flex; gap:8px; font-size:11.5px; color:var(--text2);")}>
+                    <Svg w={14} h={14} sw={2} style={S("flex:none; color:var(--text3); margin-top:1px;")}><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></Svg>
+                    <span>All <b style={{color:'var(--text)'}}>whoami</b>, <b style={{color:'var(--text)'}}>code-at-rev</b>, and <b style={{color:'var(--text)'}}>API</b> reads run against this exact deployed revision.</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </header>
+
+          <main style={S("flex:1; overflow:auto;")}>
+            {v.isDashboard && this.renderDashboard(v)}
+            {v.isNew && this.renderNew(v)}
+            {v.isDetail && this.renderDetail(v)}
+          </main>
+        </div>
+
+        {v.draftOpen && this.renderDraft(v)}
+        {v.toast && <div className="qa-fade" style={S("position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:11px 18px; border-radius:8px; font-size:13px; font-weight:600; z-index:80; box-shadow:0 8px 24px rgba(0,0,0,.3);")}>{v.toast}</div>}
+      </div>
+    );
+  }
+
+  renderDashboard(v){
+    return (
+      <div className="qa-fade" style={S("max-width:1080px; margin:0 auto; padding:32px;")}>
+        <div style={S("display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:24px;")}>
+          <div>
+            <h1 style={S("color:var(--text); font-size:24px; margin:0 0 4px;")}>Investigations</h1>
+            <p style={S("color:var(--text3); font-size:14px; margin:0;")}>Evidence-backed verdicts against the live deployed build — not vibes.</p>
+          </div>
+          <button onClick={this.goNew} style={S("display:flex; align-items:center; gap:8px; height:40px; padding:0 16px; background:var(--accent); color:#fff; border:none; border-radius:6px; font-weight:600; font-size:13.5px;")}>
+            <Svg sw={2.2} d="M12 5v14M5 12h14"/> New investigation
+          </button>
+        </div>
+        <div style={S("display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px;")}>
+          {v.stats.map((st,i)=>(
+            <div key={i} style={S("background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px 18px;")}>
+              <div style={{fontSize:'26px',fontWeight:600,color:st.color,fontVariantNumeric:'tabular-nums',lineHeight:1}}>{st.value}</div>
+              <div style={S("color:var(--text3); font-size:12.5px; margin-top:6px;")}>{st.label}</div>
+            </div>
+          ))}
+        </div>
+        <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;")}>
+          <div style={S("display:grid; grid-template-columns:62px minmax(0,1fr) 124px 86px 74px; gap:16px; padding:12px 20px; border-bottom:1px solid var(--border); color:var(--text3); font-size:11px; letter-spacing:.05em; text-transform:uppercase;")}>
+            <span>Issue</span><span>Title</span><span>Verdict</span><span>Evidence</span><span style={{textAlign:'right'}}>Updated</span>
+          </div>
+          {v.investigations.map(item=>(
+            <button key={item.number} onClick={item.onOpen} onMouseEnter={item.hoverIn} onMouseLeave={item.hoverOut}
+              style={S("display:grid; grid-template-columns:62px minmax(0,1fr) 124px 86px 74px; gap:16px; align-items:center; width:100%; text-align:left; padding:14px 20px; background:transparent; border:none; border-bottom:1px solid var(--border); color:var(--text2);")}>
+              <span style={S("font-family:var(--font-mono); font-size:12.5px; color:var(--accent);")}>#{item.number}</span>
+              <span style={S("min-width:0;")}>
+                <span style={S("display:block; color:var(--text); font-weight:600; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{item.title}</span>
+                <span style={S("display:block; color:var(--text3); font-size:11.5px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{item.area} · reported by {item.reporter}</span>
+              </span>
+              <span><span style={{display:'inline-flex',alignItems:'center',gap:'6px',padding:'4px 10px',borderRadius:'20px',fontSize:'12px',fontWeight:600,background:item.chipBg,color:item.chipFg}}><span style={{width:'6px',height:'6px',borderRadius:'50%',background:item.chipFg}}/>{item.status}</span></span>
+              <span style={S("display:flex; align-items:center; gap:5px; color:var(--text3); font-size:12px;")}><Svg w={14} h={14} d="M3 7h18M3 12h18M3 17h18"/>{item.evidenceCount} steps</span>
+              <span style={S("text-align:right; color:var(--text3); font-size:12px;")}>{item.updated}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  renderNew(v){
+    return (
+      <div className="qa-fade" style={S("max-width:680px; margin:0 auto; padding:56px 32px;")}>
+        <h1 style={S("color:var(--text); font-size:24px; margin:0 0 6px;")}>New investigation</h1>
+        <p style={S("color:var(--text3); font-size:14px; margin:0 0 28px;")}>Paste a GitHub issue and Fleet QA Studio reproduces it against the live deployed build, reads the source at the deployed revision, and gathers evidence for a verdict.</p>
+        <label style={S("display:block; color:var(--text); font-weight:600; font-size:13px; margin-bottom:8px;")}>GitHub issue URL</label>
+        <div style={S("display:flex; gap:10px; margin-bottom:8px;")}>
+          <div style={S("flex:1; display:flex; align-items:center; gap:10px; height:46px; padding:0 14px; background:var(--surface); border:1px solid var(--border); border-radius:8px;")}>
+            <Svg w={18} h={18} fill="currentColor" stroke="none" style={S("color:var(--text3); flex:none;")} d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49v-1.7c-2.78.62-3.37-1.21-3.37-1.21-.46-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.36-2.22-.26-4.55-1.14-4.55-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.27 2.75 1.05a9.4 9.4 0 0 1 5 0c1.91-1.32 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9v2.81c0 .27.18.6.69.49A10.26 10.26 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/>
+            <input value={v.urlInput} onChange={this.onUrlInput} placeholder="https://github.com/fleetdm/fleet/issues/47712" style={S("flex:1; background:transparent; border:none; outline:none; color:var(--text); font-size:14px; font-family:var(--font-mono);")}/>
+          </div>
+          <button onClick={this.runFromInput} style={S("height:46px; padding:0 22px; background:var(--accent); color:#fff; border:none; border-radius:8px; font-weight:600; font-size:14px; white-space:nowrap;")}>Investigate</button>
+        </div>
+        <p style={S("color:var(--text3); font-size:12px; margin:0 0 24px;")}>Reads are free and safe. Writes to the live instance and issue submission always require an explicit confirm.</p>
+        <div style={S("color:var(--text3); font-size:12px; text-align:center; margin:8px 0 18px; position:relative;")}><span style={S("background:var(--bg); padding:0 12px; position:relative; z-index:1;")}>or try one of these</span><span style={S("position:absolute; left:0; right:0; top:50%; height:1px; background:var(--border);")}/></div>
+        <div style={S("display:flex; flex-direction:column; gap:10px;")}>
+          {v.examples.map(ex=>(
+            <button key={ex.number} onClick={ex.onRun} style={S("display:flex; align-items:center; gap:14px; text-align:left; padding:14px 16px; background:var(--surface); border:1px solid var(--border); border-radius:8px; color:var(--text2);")}>
+              <span style={S("font-family:var(--font-mono); font-size:12.5px; color:var(--accent); flex:none;")}>#{ex.number}</span>
+              <span style={S("flex:1; min-width:0;")}><span style={S("display:block; color:var(--text); font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{ex.title}</span><span style={S("color:var(--text3); font-size:11.5px;")}>{ex.hint}</span></span>
+              <Svg w={16} h={16} style={S("color:var(--text3); flex:none;")} d="m9 18 6-6-6-6"/>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  renderStepBody(step){
+    if (step._isIssue) return (<>
+      <p style={S("color:var(--text2); font-size:13.5px; line-height:1.6; margin:0 0 16px;")}>{step.issueBody}</p>
+      <div style={S("color:var(--text3); font-size:11px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:8px;")}>Reported repro steps</div>
+      <ol style={S("margin:0 0 16px; padding-left:18px; color:var(--text2); font-size:13px; line-height:1.7;")}>{step.repro.map((r,i)=><li key={i}>{r}</li>)}</ol>
+      <div style={S("display:flex; gap:8px; flex-wrap:wrap;")}>{step.labels.map((lb,i)=><span key={i} style={S("font-family:var(--font-mono); font-size:11.5px; background:var(--well); color:var(--text2); padding:3px 9px; border-radius:20px; border:1px solid var(--border);")}>{lb}</span>)}</div>
+    </>);
+    if (step._isTarget) return (<>
+      <div style={S("display:grid; grid-template-columns:1fr 1fr; gap:14px 24px; margin-bottom:14px;")}>
+        {step.fields.map((f,i)=><div key={i}><div style={S("color:var(--text3); font-size:11px; margin-bottom:3px;")}>{f.k}</div><div style={S("color:var(--text); font-family:var(--font-mono); font-size:13px;")}>{f.v}</div></div>)}
+      </div>
+      <div style={S("display:flex; gap:9px; padding:11px 13px; background:var(--well); border-radius:6px; font-size:12.5px; color:var(--text2);")}>
+        <Svg w={15} h={15} stroke="var(--warning)" style={S("flex:none; margin-top:1px;")} d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z|M12 9v4M12 17h.01"/><span>{step.caveat}</span>
+      </div>
+    </>);
+    if (step._isReproApi) return (<>
+      <div style={S("display:flex; align-items:center; gap:10px; margin-bottom:10px;")}>
+        <span style={S("font-family:var(--font-mono); font-size:11px; font-weight:600; background:var(--accent-tint); color:var(--accent); padding:3px 8px; border-radius:4px;")}>{step.api.method}</span>
+        <span style={S("font-family:var(--font-mono); font-size:12px; color:var(--text2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{step.api.path}</span>
+        <span style={S("margin-left:auto; font-family:var(--font-mono); font-size:12px; color:var(--success); flex:none;")}>{step.api.status} OK</span>
+        <span style={S("display:inline-flex; align-items:center; gap:4px; font-size:10.5px; color:var(--text3); flex:none;")}><Svg w={12} h={12}><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></Svg>read-only</span>
+      </div>
+      <pre style={S("margin:0 0 14px; background:var(--code-bg); color:var(--code-fg); padding:14px; border-radius:6px; font-size:12.5px; line-height:1.6; overflow:auto;")}>{step.api.body}</pre>
+      <div style={S("display:flex; gap:9px; padding:11px 13px; background:rgba(61,182,123,.10); border:1px solid rgba(61,182,123,.3); border-radius:6px; font-size:12.5px; color:var(--text2); margin-bottom:16px;")}>
+        <Svg w={15} h={15} stroke="var(--success)" sw={2.4} style={S("flex:none; margin-top:1px;")} d="M20 6 9 17l-5-5"/><span>{step.apiNote}</span>
+      </div>
+      <div style={S("color:var(--text3); font-size:11px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:8px;")}>Browser screenshots</div>
+      <div style={S("display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;")}>
+        {step.shots.map((sh,i)=><div key={i} style={S("border:1px solid var(--border); border-radius:6px; overflow:hidden; background:var(--well);")}><div style={sh.thumbStyle}>{sh.mock}</div><div style={S("padding:8px 10px; font-size:11.5px; color:var(--text2); border-top:1px solid var(--border);")}>{sh.label}</div></div>)}
+      </div>
+      <div style={S("font-family:var(--font-mono); font-size:11.5px; color:var(--text3); margin-bottom:12px;")}>{step.domMeasure}</div>
+      <div style={S("display:flex; gap:9px; padding:11px 13px; background:var(--well); border-radius:6px; font-size:12.5px; color:var(--text2);")}><Svg w={15} h={15} stroke="var(--warning)" style={S("flex:none; margin-top:1px;")} d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z|M12 9v4M12 17h.01"/><span>{step.caveat}</span></div>
+    </>);
+    if (step._isSampler) return (<>
+      <div style={S("display:flex; align-items:center; gap:10px; font-size:12.5px; color:var(--text2); margin-bottom:6px;")}><Svg w={15} h={15} stroke="var(--accent)" d="M3 12h4l3-8 4 16 3-8h4"/><span style={S("font-weight:600; color:var(--text);")}>Per-frame sampler</span><span style={S("font-family:var(--font-mono); color:var(--text3);")}>{step.samplerMeta}</span></div>
+      <div style={S("font-size:12px; color:var(--text3); margin-bottom:12px;")}>Trigger: {step.trigger}</div>
+      <div style={S("background:var(--well); border:1px solid var(--border); border-radius:8px; padding:14px 14px 8px;")}>
+        <svg viewBox="0 0 640 168" style={{width:'100%',height:'auto',display:'block'}} preserveAspectRatio="none">
+          <line x1="40" y1="10" x2="40" y2="140" stroke="var(--border)" strokeWidth="1"/>
+          <line x1="40" y1="140" x2="630" y2="140" stroke="var(--border)" strokeWidth="1"/>
+          <line x1="40" y1="75" x2="630" y2="75" stroke="var(--border)" strokeWidth="1" strokeDasharray="3 4"/>
+          {step.flash && <><rect x={step.flash.x} y="10" width={step.flash.w} height="130" fill="rgba(255,92,131,.12)"/><text x={step.flash.tx} y="24" fill="var(--danger)" fontSize="11" fontFamily="var(--font-mono)">{step.flash.label}</text></>}
+          {step.series.map((ser,i)=><polyline key={i} points={ser.points} fill="none" stroke={ser.color} strokeWidth="2.2" strokeLinejoin="round"/>)}
+          <text x="6" y="18" fill="var(--text3)" fontSize="10" fontFamily="var(--font-mono)">1.0</text>
+          <text x="6" y="144" fill="var(--text3)" fontSize="10" fontFamily="var(--font-mono)">0.0</text>
+        </svg>
+        <div style={S("display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:10px; color:var(--text3); padding:0 0 4px 40px;")}><span>f0</span><span>f{step.lastFrame}</span></div>
+      </div>
+      <div style={S("display:flex; gap:18px; flex-wrap:wrap; margin:12px 0;")}>{step.series.map((ser,i)=><span key={i} style={S("display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--text2);")}><span style={{width:'14px',height:'3px',borderRadius:'2px',background:ser.color}}/>{ser.name}</span>)}</div>
+      <div style={{display:'flex',gap:'9px',padding:'11px 13px',borderRadius:'6px',fontSize:'12.5px',color:'var(--text2)',...step.verdictNoteStyle}}><span style={{flex:'none',marginTop:'1px'}}>{step.verdictNoteIcon}</span><span>{step.samplerNote}</span></div>
+      <div style={S("display:flex; gap:9px; padding:11px 13px; background:var(--well); border-radius:6px; font-size:12.5px; color:var(--text2); margin-top:10px;")}><Svg w={15} h={15} stroke="var(--warning)" style={S("flex:none; margin-top:1px;")} d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z|M12 9v4M12 17h.01"/><span>{step.caveat}</span></div>
+    </>);
+    if (step._isRoot) return (<>
+      <div style={S("display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;")}><Svg w={14} h={14} stroke="var(--text3)" d="m16 18 6-6-6-6M8 6l-6 6 6 6"/><span style={S("font-family:var(--font-mono); font-size:12px; color:var(--text2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{step.file}</span><span style={S("font-family:var(--font-mono); font-size:11px; color:var(--accent); background:var(--accent-tint); padding:2px 7px; border-radius:4px; flex:none;")}>@ {step.fileRev}</span></div>
+      <div style={S("background:var(--code-bg); border-radius:6px; overflow:hidden; margin-bottom:14px; font-family:var(--font-mono); font-size:12.5px; line-height:1.7;")}>
+        {step.diff.map((line,i)=><div key={i} style={{display:'flex',padding:'0 14px',...line.rowStyle}}><span style={{width:'14px',flex:'none',opacity:.7}}>{line.prefix}</span><span style={{whiteSpace:'pre-wrap'}}>{line.text}</span></div>)}
+      </div>
+      <div style={S("font-family:var(--font-mono); font-size:12px; color:var(--text3); margin-bottom:14px;")}>$ {step.grep}</div>
+      <div style={S("display:flex; gap:9px; padding:11px 13px; background:var(--accent-tint); border-radius:6px; font-size:12.5px; color:var(--text);")}><Svg w={15} h={15} stroke="var(--accent)" style={S("flex:none; margin-top:1px;")}><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></Svg><span>{step.found}</span></div>
+    </>);
+    if (step._isBuild) return (<>
+      <div style={S("font-size:13px; color:var(--text2); margin-bottom:14px;")}>{step.question}</div>
+      <div style={{display:'flex',alignItems:'center',gap:'14px',padding:'16px',borderRadius:'8px',marginBottom:'14px',...step.answerBoxStyle}}><span style={step.answerBadgeStyle}>{step.answerBadge}</span><span style={{color:'var(--text)',fontWeight:600,fontSize:'15px'}}>{step.answerHeadline}</span></div>
+      <div style={S("display:flex; flex-direction:column; gap:1px; background:var(--border); border:1px solid var(--border); border-radius:6px; overflow:hidden;")}>
+        {step.rows.map((row,i)=><div key={i} style={S("display:flex; align-items:center; gap:12px; padding:11px 14px; background:var(--surface);")}><span style={row.iconStyle}>{row.ok ? <Svg w={12} h={12} sw={3} d="M20 6 9 17l-5-5"/> : <Svg w={12} h={12} sw={3} d="M18 6 6 18M6 6l12 12"/>}</span><span style={S("font-family:var(--font-mono); font-size:12.5px; color:var(--text);")}>{row.k}</span><span style={S("margin-left:auto; font-size:12px; color:var(--text3);")}>{row.v}</span></div>)}
+      </div>
+      <div style={S("font-size:12px; color:var(--text3); margin-top:12px;")}>{step.detail}</div>
+    </>);
+    if (step._isVerdict) return (<>
+      <p style={S("color:var(--text2); font-size:13px; line-height:1.6; margin:0 0 12px;")}>The tool proposes a verdict from the evidence above. A human reviews and confirms it in the panel on the right.</p>
+      <div style={S("display:flex; align-items:center; gap:10px; font-size:13px; color:var(--text2);")}><span style={S("color:var(--text3);")}>Proposed:</span><span style={{display:'inline-flex',alignItems:'center',gap:'7px',padding:'5px 12px',borderRadius:'20px',fontWeight:600,background:this.renderVals().inv.chipBg,color:this.renderVals().inv.chipFg}}><span style={{width:'6px',height:'6px',borderRadius:'50%',background:this.renderVals().inv.chipFg}}/>{this.renderVals().inv.verdict}</span></div>
+    </>);
+    if (step._isDraft) return (<>
+      <p style={S("color:var(--text2); font-size:13px; line-height:1.6; margin:0 0 14px;")}>A bug-report issue is prefilled from the evidence. You review every field and submit it manually — Fleet QA Studio never auto-posts.</p>
+      <button onClick={this.openDraft} style={S("display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 16px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text); font-weight:600; font-size:13px;")}><Svg w={15} h={15} fill="currentColor" stroke="none" d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49v-1.7c-2.78.62-3.37-1.21-3.37-1.21-.46-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.36-2.22-.26-4.55-1.14-4.55-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.27 2.75 1.05a9.4 9.4 0 0 1 5 0c1.91-1.32 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9v2.81c0 .27.18.6.69.49A10.26 10.26 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/>Open prefilled issue draft</button>
+    </>);
+    return <div style={S("color:var(--text3); font-size:12.5px;")}>Run this step to gather evidence.</div>;
+  }
+
+  renderDetail(v){
+    const inv = v.inv;
+    return (
+      <div className="qa-fade" style={S("max-width:1080px; margin:0 auto; padding:28px 32px 80px;")}>
+        <button onClick={this.goDashboard} style={S("display:inline-flex; align-items:center; gap:6px; background:transparent; border:none; color:var(--text3); font-size:12.5px; margin-bottom:14px; padding:0;")}><Svg w={15} h={15} d="m15 18-6-6 6-6"/>All investigations</button>
+        <div style={S("display:flex; align-items:flex-start; gap:16px; margin-bottom:6px;")}>
+          <h1 style={S("color:var(--text); font-size:22px; line-height:1.3; flex:1; margin:0;")}>{inv.title}</h1>
+          <span style={{display:'inline-flex',alignItems:'center',gap:'7px',padding:'6px 14px',borderRadius:'20px',fontSize:'13px',fontWeight:600,background:inv.chipBg,color:inv.chipFg,flex:'none',whiteSpace:'nowrap'}}><span style={{width:'7px',height:'7px',borderRadius:'50%',background:inv.chipFg}}/>{inv.status}</span>
+        </div>
+        <div style={S("display:flex; align-items:center; gap:14px; color:var(--text3); font-size:12.5px; margin-bottom:24px; flex-wrap:wrap;")}>
+          <a href="#" style={S("font-family:var(--font-mono); color:var(--accent); font-size:12.5px;")}>fleetdm/fleet#{inv.number}</a>
+          <span>·</span><span>{inv.area}</span><span>·</span><span>reported by {inv.reporter}</span><span>·</span><span>Fleet {inv.reportedVersion}</span>
+        </div>
+        <div style={S("display:grid; grid-template-columns:1fr 320px; gap:28px; align-items:start;")}>
+          {/* TIMELINE */}
+          <div>
+            <div style={S("display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;")}>
+              <span style={S("color:var(--text); font-weight:600; font-size:15px;")}>Evidence timeline</span>
+              <div style={S("display:flex; gap:6px;")}>
+                <button onClick={this.expandAll} style={S("height:30px; padding:0 12px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text2); font-size:12px;")}>Expand all</button>
+                <button onClick={this.collapseAll} style={S("height:30px; padding:0 12px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text2); font-size:12px;")}>Collapse</button>
+              </div>
+            </div>
+            {v.hasQueued && (
+              <div style={S("display:flex; align-items:center; gap:12px; padding:14px 16px; background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-bottom:14px;")}>
+                <Svg w={18} h={18} stroke="var(--accent)" d="M5 3l14 9-14 9V3z"/><span style={S("flex:1; color:var(--text2); font-size:13px;")}>Steps 3–7 are queued. Run them to gather evidence against the deployed build.</span>
+                <button onClick={this.runRemaining} style={S("height:34px; padding:0 16px; background:var(--accent); color:#fff; border:none; border-radius:6px; font-weight:600; font-size:13px;")}>{v.runLabel}</button>
+              </div>
+            )}
+            <div style={S("display:flex; flex-direction:column;")}>
+              {v.steps.map((step,i)=>(
+                <div key={i} style={S("display:flex; gap:14px;")}>
+                  <div style={S("display:flex; flex-direction:column; align-items:center; flex:none; width:30px;")}>
+                    <div style={step.nodeStyle}>
+                      {step._done && <Svg w={14} h={14} sw={3} d="M20 6 9 17l-5-5"/>}
+                      {step._running && <span className="qa-spin" style={{width:'13px',height:'13px',border:'2px solid currentColor',borderTopColor:'transparent',borderRadius:'50%',display:'block'}}/>}
+                      {step._queued && <span style={{fontSize:'11px',fontWeight:600}}>{step.idx}</span>}
+                    </div>
+                    <div style={step.connectorStyle}/>
+                  </div>
+                  <div style={S("flex:1; min-width:0; margin-bottom:12px;")}>
+                    <button onClick={step.onToggle} style={S("width:100%; display:flex; align-items:center; gap:12px; text-align:left; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:13px 16px; color:var(--text2);")}>
+                      <span style={S("color:var(--text3); font-family:var(--font-mono); font-size:11px; flex:none;")}>{step.tool}</span>
+                      <span style={S("color:var(--text); font-weight:600; font-size:13.5px; flex:none;")}>{step.title}</span>
+                      <span style={S("color:var(--text3); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0;")}>— {step.summary}</span>
+                      {step._queued && <span style={S("color:var(--text3); font-size:11px; flex:none;")}>queued</span>}
+                      <Svg w={16} h={16} style={{color:'var(--text3)',flex:'none',transition:'transform .2s',...step.chevronStyle}} d="m6 9 6 6 6-6"/>
+                    </button>
+                    {step._open && (
+                      <div className="qa-fade" style={S("border:1px solid var(--border); border-top:none; border-radius:0 0 8px 8px; margin-top:-1px; padding:18px; background:var(--surface);")}>
+                        {this.renderStepBody(step)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* VERDICT PANEL */}
+          <div style={S("position:sticky; top:0;")}>
+            <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:18px;")}>
+              <div style={S("display:flex; align-items:center; gap:8px; margin-bottom:4px;")}>
+                <span style={S("color:var(--text); font-weight:600; font-size:15px;")}>Verdict</span>
+                <span style={S("margin-left:auto; font-size:10.5px; color:var(--text3); display:inline-flex; align-items:center; gap:4px;")}><Svg w={12} h={12} d="M16 7a4 4 0 1 0-8 0M3 21h18M5 21V11h14v10"/>You decide</span>
+              </div>
+              <p style={S("color:var(--text3); font-size:12px; line-height:1.5; margin:0 0 14px;")}>The tool gathers evidence and proposes. A human owns the call — confirm it below.</p>
+              <div style={S("display:flex; flex-direction:column; gap:7px; margin-bottom:16px;")}>
+                {v.verdictOptions.map((opt,i)=>(
+                  <button key={i} onClick={opt.onSelect} style={opt.optStyle}>
+                    <span style={{width:'14px',height:'14px',borderRadius:'50%',flex:'none',border:'2px solid '+opt.ring,display:'flex',alignItems:'center',justifyContent:'center'}}>{opt.selected && <span style={{width:'7px',height:'7px',borderRadius:'50%',background:opt.color}}/>}</span>
+                    <span style={{fontWeight:600,fontSize:'13px',color:'var(--text)'}}>{opt.label}</span>
+                    {opt.isProposed && <span style={S("margin-left:auto; font-size:10px; color:var(--text3); background:var(--well); padding:2px 6px; border-radius:4px;")}>proposed</span>}
+                  </button>
+                ))}
+              </div>
+              {v.verdictConfirmed
+                ? <div style={S("display:flex; align-items:center; gap:8px; padding:10px 12px; background:rgba(61,182,123,.10); border:1px solid rgba(61,182,123,.3); border-radius:6px; color:var(--success); font-size:12.5px; font-weight:600; margin-bottom:14px;")}><Svg w={15} h={15} sw={2.4} d="M20 6 9 17l-5-5"/>Confirmed by {v.confirmedBy}</div>
+                : <button onClick={this.confirmVerdict} style={S("width:100%; height:40px; background:var(--accent); color:#fff; border:none; border-radius:6px; font-weight:600; font-size:13.5px; margin-bottom:14px;")}>Confirm verdict</button>}
+              <div style={S("color:var(--text3); font-size:11px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:8px; display:flex; align-items:center; justify-content:space-between;")}>
+                <span>QA comment</span>
+                <button onClick={this.copyComment} style={S("background:transparent; border:none; color:var(--accent); font-size:11px; font-weight:600; display:inline-flex; align-items:center; gap:4px; padding:0;")}><Svg w={12} h={12}><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></Svg>{v.copyLabel}</button>
+              </div>
+              <textarea readOnly value={v.qaComment} style={S("width:100%; height:148px; resize:none; background:var(--well); border:1px solid var(--border); border-radius:6px; padding:11px; color:var(--text2); font-size:12px; line-height:1.6; outline:none;")}/>
+              <button onClick={this.openDraft} style={S("width:100%; height:40px; margin-top:12px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text); font-weight:600; font-size:13px; display:flex; align-items:center; justify-content:center; gap:8px;")}><Svg w={15} h={15} fill="currentColor" stroke="none" d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49v-1.7c-2.78.62-3.37-1.21-3.37-1.21-.46-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.36-2.22-.26-4.55-1.14-4.55-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.27 2.75 1.05a9.4 9.4 0 0 1 5 0c1.91-1.32 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9v2.81c0 .27.18.6.69.49A10.26 10.26 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/>Draft GitHub issue</button>
+            </div>
+            <div style={S("margin-top:14px; padding:13px 15px; background:var(--surface); border:1px solid var(--border); border-radius:8px; display:flex; gap:9px;")}><Svg w={15} h={15} stroke="var(--text3)" style={S("flex:none; margin-top:1px;")}><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></Svg><span style={S("font-size:11.5px; color:var(--text3); line-height:1.5;")}>Reads are free. Live-instance writes and issue submission always require an explicit confirm.</span></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  renderDraft(v){
+    return (
+      <div onClick={this.closeModal} style={S("position:fixed; inset:0; background:rgba(25,33,71,.5); display:flex; align-items:flex-start; justify-content:center; padding:48px 24px; z-index:60; overflow:auto;")}>
+        <div onClick={this.stop} className="qa-fade" style={S("width:680px; max-width:100%; background:var(--surface); border:1px solid var(--border); border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,.4); overflow:hidden;")}>
+          <div style={S("display:flex; align-items:center; gap:10px; padding:16px 20px; border-bottom:1px solid var(--border);")}>
+            <Svg w={18} h={18} fill="var(--text)" stroke="none" d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49v-1.7c-2.78.62-3.37-1.21-3.37-1.21-.46-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.36-2.22-.26-4.55-1.14-4.55-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.27 2.75 1.05a9.4 9.4 0 0 1 5 0c1.91-1.32 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9v2.81c0 .27.18.6.69.49A10.26 10.26 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/>
+            <span style={S("color:var(--text); font-weight:600; font-size:15px;")}>New issue · fleetdm/fleet</span>
+            <span style={S("font-size:11px; color:var(--text3); background:var(--well); padding:3px 8px; border-radius:4px;")}>bug report template</span>
+            <button onClick={this.closeModal} style={S("margin-left:auto; width:30px; height:30px; background:transparent; border:none; color:var(--text3); display:flex; align-items:center; justify-content:center;")}><Svg w={18} h={18} d="M18 6 6 18M6 6l12 12"/></button>
+          </div>
+          <div style={S("padding:20px; max-height:54vh; overflow:auto;")}>
+            <div style={S("color:var(--text3); font-size:11px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:6px;")}>Title</div>
+            <div style={S("background:var(--well); border:1px solid var(--border); border-radius:6px; padding:11px 13px; color:var(--text); font-weight:600; font-size:14px; margin-bottom:16px;")}>{v.draftTitle}</div>
+            <div style={S("color:var(--text3); font-size:11px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:6px;")}>Description</div>
+            <pre style={S("margin:0 0 16px; background:var(--well); color:var(--text2); padding:14px; border-radius:6px; font-size:12px; line-height:1.65; white-space:pre-wrap;")}>{v.draftBody}</pre>
+            <div style={S("color:var(--text3); font-size:11px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:8px;")}>Labels</div>
+            <div style={S("display:flex; gap:8px; flex-wrap:wrap;")}>{v.draftLabels.map((lb,i)=><span key={i} style={S("font-family:var(--font-mono); font-size:11.5px; background:var(--accent-tint); color:var(--accent); padding:4px 10px; border-radius:20px;")}>{lb}</span>)}</div>
+          </div>
+          <div style={S("display:flex; align-items:center; gap:12px; padding:16px 20px; border-top:1px solid var(--border); background:var(--bg);")}>
+            <Svg w={15} h={15} stroke="var(--warning)" style={S("flex:none;")} d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z|M12 9v4M12 17h.01"/>
+            <span style={S("flex:1; font-size:12px; color:var(--text3);")}>This is a draft. Submitting opens GitHub with the issue prefilled — nothing is posted automatically.</span>
+            <button onClick={this.closeModal} style={S("height:38px; padding:0 16px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text2); font-weight:600; font-size:13px;")}>Cancel</button>
+            <button onClick={this.confirmSubmit} style={S("height:38px; padding:0 18px; background:var(--green); color:#fff; border:none; border-radius:6px; font-weight:600; font-size:13px; display:inline-flex; align-items:center; gap:7px;")}>Open in GitHub<Svg w={14} h={14} d="M7 17 17 7M9 7h8v8"/></button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+}
+
+ReactDOM.createRoot(document.getElementById('app')).render(<Studio/>);
+</script>
+</body>
+</html>
