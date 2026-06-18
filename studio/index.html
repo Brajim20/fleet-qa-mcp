@@ -107,10 +107,11 @@ class Studio extends React.Component {
     live: false, liveList: [], liveReports: {}, busy: false, busyMsg: '',
     liveVerdict: {}, liveConfirmed: {},
     // QA queue (real open bugs) + generated-spec modal.
-    queue: [], queueLoading: false, queueLabel: 'bug', queueGroup: '', queueStatus: '', spec: null,
+    queue: [], queueLoading: false, queueLabel: 'bug', queueGroup: '#g-software', queueStatus: '', spec: null,
   };
-  // Fleet engineering product groups (the #g-* labels) for the queue filter.
-  GROUPS = ['#g-software','#g-mdm','#g-orchestration','#g-security-compliance','#g-power-to-pc'];
+  // Fleet engineering product groups (the #g-* labels) for the queue filter,
+  // matching the org's project boards (github.com/orgs/fleetdm/projects).
+  GROUPS = ['#g-software','#g-mdm','#g-security-compliance','#g-first-impressions','#g-orchestration','#g-power-to-pc'];
   // Status chip colors, keyed by Fleet's workflow status (from process labels).
   STATUS_CHIP = {
     'Release':{bg:'rgba(106,103,254,.16)',fg:'#8b89ff'},
