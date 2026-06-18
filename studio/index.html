@@ -112,6 +112,10 @@ class Studio extends React.Component {
     'Cannot reproduce':{bg:'rgba(235,188,67,.16)',fg:'#d6a32e'},
   };
   VERDICTS = ['Fixed','Confirmed bug','Not a bug','Cannot reproduce'];
+  // Current user — shown in the sidebar and verdict confirmations.
+  // Set to your GitHub username (or full name).
+  USER = { name: 'Brajim20', role: 'QA engineer' };
+  get userInitials(){ return (this.USER.name || '?').replace(/[^A-Za-z0-9]/g,'').slice(0,2).toUpperCase(); }
 
   invByNumber(n){ return this.investigations.find(i => i.number === n); }
   get active(){ return this.invByNumber(this.state.activeId); }
@@ -383,7 +387,7 @@ class Studio extends React.Component {
       navRecent, investigations, stats, examples, targetOpen:s.targetOpen,
       urlInput:s.urlInput, inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
       runLabel: s.running?'Running…':'Run remaining checks',
-      verdictOptions, verdictConfirmed, verdictUnconfirmed:!verdictConfirmed, confirmedBy:'Quinn Avery',
+      verdictOptions, verdictConfirmed, verdictUnconfirmed:!verdictConfirmed, confirmedBy:this.USER.name,
       qaComment:this.qaComment(), copyLabel:s.copied?'Copied':'Copy',
       draftOpen:s.modal==='draft', draftTitle:d.title, draftBody:d.body, draftLabels:d.labels, toast:s.toast,
     };
@@ -421,10 +425,10 @@ class Studio extends React.Component {
             ))}
           </div>
           <div style={S("padding:12px; border-top:1px solid var(--border); display:flex; align-items:center; gap:10px;")}>
-            <div style={S("width:30px; height:30px; border-radius:50%; background:var(--accent-tint); color:var(--accent); display:flex; align-items:center; justify-content:center; font-weight:600; font-size:12px; flex:none;")}>QA</div>
+            <div style={S("width:30px; height:30px; border-radius:50%; background:var(--accent-tint); color:var(--accent); display:flex; align-items:center; justify-content:center; font-weight:600; font-size:12px; flex:none;")}>{this.userInitials}</div>
             <div style={S("line-height:1.2; min-width:0;")}>
-              <div style={S("color:var(--text); font-weight:600; font-size:12.5px;")}>Quinn Avery</div>
-              <div style={S("color:var(--text3); font-size:11px;")}>QA engineer</div>
+              <div style={S("color:var(--text); font-weight:600; font-size:12.5px;")}>{this.USER.name}</div>
+              <div style={S("color:var(--text3); font-size:11px;")}>{this.USER.role}</div>
             </div>
             <button onClick={this.toggleTheme} title="Toggle theme" style={S("margin-left:auto; width:30px; height:30px; flex:none; border:1px solid var(--border); background:transparent; color:var(--text2); border-radius:6px; display:flex; align-items:center; justify-content:center;")}>
               {v.isDark
