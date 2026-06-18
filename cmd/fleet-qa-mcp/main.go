@@ -24,6 +24,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/spf13/pflag"
 )
 
 func main() {
@@ -253,7 +254,9 @@ func runCLI(name string, args []string) {
 		printCLIHelp()
 		return
 	}
-	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	// pflag parses flags interspersed with positionals, so users can put
+	// --flags before OR after positional args (stdlib flag can't).
+	fs := pflag.NewFlagSet(name, pflag.ExitOnError)
 	ctxName := fs.String("context", ctxFromEnv(), "~/.fleet/config context")
 
 	// per-subcommand flags
@@ -320,13 +323,13 @@ func printCLIHelp() {
   browser-eval <url> <js> [--screenshot P]             run JS in real Chromium
   issue --title T --actual A --steps S [--labels ...]  prefilled GitHub issue URL
 
-Setup: --install-browsers | --auth ; flags come before positionals.
+Setup: --install-browsers | --auth | --provision-repo ; flags may appear anywhere.
 `)
 }
 
 func arg(pos []string, i int, name string) string {
 	if i >= len(pos) {
-		fatal(fmt.Sprintf("missing required argument <%s> (flags must precede positionals)", name))
+		fatal(fmt.Sprintf("missing required argument <%s>", name))
 	}
 	return pos[i]
 }

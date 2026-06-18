@@ -99,12 +99,17 @@ func Open(instanceURL, pageURL string) (*Session, error) {
 		return nil, err
 	}
 	if pageURL != "" {
+		// Wait for "load", NOT networkidle: Fleet is an SPA that polls
+		// continuously, so networkidle never settles — Goto would hang and
+		// leave the page mid-navigation (which then breaks Screenshot/Eval).
 		if _, err := page.Goto(pageURL, playwright.PageGotoOptions{
-			WaitUntil: playwright.WaitUntilStateNetworkidle,
+			WaitUntil: playwright.WaitUntilStateLoad,
+			Timeout:   playwright.Float(20000),
 		}); err != nil {
-			// non-fatal: caller may still want to inspect
-			_ = err
+			_ = err // non-fatal: caller may still want to inspect
 		}
+		// Brief settle for client-side render.
+		page.WaitForTimeout(1500)
 	}
 	return &Session{pw: pw, browser: b, page: page}, nil
 }

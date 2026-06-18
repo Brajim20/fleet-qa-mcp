@@ -140,6 +140,8 @@ func (a *App) BrowserEval(pageURL, js, screenshot string) (string, error) {
 	if screenshot != "" {
 		if p, serr := sess.Screenshot(screenshot); serr == nil {
 			note = "\n(screenshot: " + p + ")"
+		} else {
+			note = "\n(screenshot FAILED: " + serr.Error() + ")" // don't swallow it
 		}
 	}
 	b, _ := json.MarshalIndent(val, "", "  ")
@@ -162,7 +164,7 @@ func (a *App) BuildIssueURL(title, actual, steps, discovered, toFix, moreInfo st
 }
 
 func short(s string) string {
-	if len(s) > 10 {
+	if len(s) >= 40 { // full SHA → abbreviate; leave branch names/short refs intact
 		return s[:10]
 	}
 	return s
