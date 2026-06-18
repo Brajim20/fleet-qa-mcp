@@ -4,28 +4,31 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fleet QA Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script>window.__qaErr=null;window.addEventListener('error',function(e){if(!window.__qaErr)window.__qaErr=(e.message||String(e.error))+' @ '+(e.filename||'').split('/').pop()+':'+(e.lineno||'');});</script>
 <script src="./vendor/react.production.min.js"></script>
 <script src="./vendor/react-dom.production.min.js"></script>
 <script src="./vendor/babel.min.js"></script>
 <style>
   :root{
-    --font-sans:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,sans-serif;
+    --font-sans:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
     --font-mono:ui-monospace,"SF Mono","Roboto Mono",Menlo,Consolas,monospace;
   }
   html,body{margin:0;padding:0;height:100%;}
   /* ---- design tokens (from the .dc.html helmet) ---- */
   .qa{
     --bg:#0d0f13; --surface:#1a1f27; --surface2:#242a33; --well:#14181f; --border:#333a45;
-    --text:#ffffff; --text2:#d6dae4; --text3:#969db0;
+    --text:#bebebf; --text2:#d6dae4; --text3:#969db0;
     --accent:#6a67fe; --accent-over:#5d5ae7; --accent-tint:rgba(106,103,254,.15);
-    --green:#009a7d; --green-over:#00886c; --purple:#ae6ddf;
+    --green:#00c28b; --green-over:#00a878; --purple:#ae6ddf;
     --danger:#ff5c83; --success:#3db67b; --warning:#ebbc43; --error:#d66c7b;
     --code-bg:#11152b; --code-fg:#e8eaf0;
   }
   .qa.theme-light{
     --bg:#f9fafc; --surface:#ffffff; --surface2:#f4f4f6; --well:#f4f4f6; --border:#e2e4ea;
-    --text:#192147; --text2:#515774; --text3:#8b8fa2;
+    --text:#1a1c21; --text2:#515774; --text3:#8b8fa2;
     --accent-tint:rgba(106,103,254,.10);
     --code-bg:#192147; --code-fg:#e8eaf0;
   }
@@ -112,6 +115,7 @@ class Studio extends React.Component {
     'Cannot reproduce':{bg:'rgba(235,188,67,.16)',fg:'#d6a32e'},
   };
   VERDICTS = ['Fixed','Confirmed bug','Not a bug','Cannot reproduce'];
+  SHORT = { 'Fixed':'Fixed', 'Confirmed bug':'Bug', 'Not a bug':'Not a bug', 'In progress':'In progress', 'Cannot reproduce':'No repro' };
   // Current user — shown in the sidebar and verdict confirmations.
   // Set to your GitHub username (or full name).
   USER = { name: 'Brajim20', role: 'QA engineer' };
@@ -337,7 +341,7 @@ class Studio extends React.Component {
     const navBtn = (active) => ({ display:'flex',alignItems:'center',gap:'10px',width:'100%',textAlign:'left',height:'38px',padding:'0 12px',borderRadius:'6px',border:'none',fontSize:'13.5px',fontWeight:600, background:active?'var(--accent-tint)':'transparent', color:active?'var(--accent)':'var(--text2)' });
     const chipFor = (st) => this.CHIP[st] || this.CHIP['In progress'];
     const investigations = this.investigations.map(i => { const c=chipFor(i.status); return { ...i, chipBg:c.bg, chipFg:c.fg, evidenceCount:7, onOpen:()=>this.openInv(i.number), hoverIn:(e)=>{e.currentTarget.style.background='var(--surface2)';}, hoverOut:(e)=>{e.currentTarget.style.background='transparent';} }; });
-    const navRecent = this.investigations.slice(0,5).map(i => { const c=chipFor(i.status); const active=s.view==='detail'&&s.activeId===i.number; return { number:i.number, dot:c.fg, shortStatus:i.status==='Confirmed bug'?'bug':i.status.split(' ')[0], onOpen:()=>this.openInv(i.number), navStyle:{display:'flex',alignItems:'center',gap:'8px',width:'100%',textAlign:'left',height:'32px',padding:'0 8px',borderRadius:'6px',border:'none',background:active?'var(--surface2)':'transparent',color:active?'var(--text)':'var(--text2)',fontSize:'12.5px',fontWeight:600} }; });
+    const navRecent = this.investigations.slice(0,5).map(i => { const c=chipFor(i.status); const active=s.view==='detail'&&s.activeId===i.number; return { number:i.number, dot:c.fg, shortColor:c.fg, shortStatus:this.SHORT[i.status]||i.status, onOpen:()=>this.openInv(i.number), navStyle:{display:'flex',alignItems:'center',gap:'8px',width:'100%',textAlign:'left',height:'32px',padding:'0 8px',borderRadius:'6px',border:'none',background:active?'var(--surface2)':'transparent',color:active?'var(--text)':'var(--text2)',fontSize:'12.5px',fontWeight:600} }; });
     const stats = [
       { value:this.investigations.filter(i=>i.status==='In progress').length, label:'In progress', color:'#6a67fe' },
       { value:this.investigations.filter(i=>i.status==='Confirmed bug').length, label:'Confirmed bugs', color:'#ff5c83' },
@@ -420,7 +424,7 @@ class Studio extends React.Component {
               <button key={r.number} onClick={r.onOpen} style={r.navStyle}>
                 <span style={{width:'7px',height:'7px',borderRadius:'50%',flex:'none',background:r.dot}}/>
                 <span style={S("overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-variant-numeric:tabular-nums;")}>#{r.number}</span>
-                <span style={S("margin-left:auto; color:var(--text3); font-size:11px; flex:none;")}>{r.shortStatus}</span>
+                <span style={{...S("margin-left:auto; font-size:11px; flex:none; font-weight:600; white-space:nowrap;"), color:r.shortColor}}>{r.shortStatus}</span>
               </button>
             ))}
           </div>
@@ -496,7 +500,7 @@ class Studio extends React.Component {
             <h1 style={S("color:var(--text); font-size:24px; margin:0 0 4px;")}>Investigations</h1>
             <p style={S("color:var(--text3); font-size:14px; margin:0;")}>Evidence-backed verdicts against the live deployed build — not vibes.</p>
           </div>
-          <button onClick={this.goNew} style={S("display:flex; align-items:center; gap:8px; height:40px; padding:0 16px; background:var(--accent); color:#fff; border:none; border-radius:6px; font-weight:600; font-size:13.5px;")}>
+          <button onClick={this.goNew} style={S("display:flex; align-items:center; gap:8px; height:40px; padding:0 16px; background:var(--accent); color:#1a1c21; border:none; border-radius:6px; font-weight:600; font-size:13.5px;")}>
             <Svg sw={2.2} d="M12 5v14M5 12h14"/> New investigation
           </button>
         </div>
@@ -509,18 +513,18 @@ class Studio extends React.Component {
           ))}
         </div>
         <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;")}>
-          <div style={S("display:grid; grid-template-columns:62px minmax(0,1fr) 124px 86px 74px; gap:16px; padding:12px 20px; border-bottom:1px solid var(--border); color:var(--text3); font-size:11px; letter-spacing:.05em; text-transform:uppercase;")}>
-            <span>Issue</span><span>Title</span><span>Verdict</span><span>Evidence</span><span style={{textAlign:'right'}}>Updated</span>
+          <div style={S("display:grid; grid-template-columns:62px minmax(0,1fr) 150px 86px 74px; gap:16px; padding:12px 20px; border-bottom:1px solid var(--border); color:var(--text3); font-size:11px; letter-spacing:.05em; text-transform:uppercase;")}>
+            <span>Issue</span><span>Title</span><span>Status</span><span>Evidence</span><span style={{textAlign:'right'}}>Updated</span>
           </div>
           {v.investigations.map(item=>(
             <button key={item.number} onClick={item.onOpen} onMouseEnter={item.hoverIn} onMouseLeave={item.hoverOut}
-              style={S("display:grid; grid-template-columns:62px minmax(0,1fr) 124px 86px 74px; gap:16px; align-items:center; width:100%; text-align:left; padding:14px 20px; background:transparent; border:none; border-bottom:1px solid var(--border); color:var(--text2);")}>
+              style={S("display:grid; grid-template-columns:62px minmax(0,1fr) 150px 86px 74px; gap:16px; align-items:center; width:100%; text-align:left; padding:14px 20px; background:transparent; border:none; border-bottom:1px solid var(--border); color:var(--text2);")}>
               <span style={S("font-family:var(--font-mono); font-size:12.5px; color:var(--accent);")}>#{item.number}</span>
               <span style={S("min-width:0;")}>
                 <span style={S("display:block; color:var(--text); font-weight:600; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{item.title}</span>
                 <span style={S("display:block; color:var(--text3); font-size:11.5px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{item.area} · reported by {item.reporter}</span>
               </span>
-              <span><span style={{display:'inline-flex',alignItems:'center',gap:'6px',padding:'4px 10px',borderRadius:'20px',fontSize:'12px',fontWeight:600,background:item.chipBg,color:item.chipFg}}><span style={{width:'6px',height:'6px',borderRadius:'50%',background:item.chipFg}}/>{item.status}</span></span>
+              <span><span style={{display:'inline-flex',alignItems:'center',gap:'6px',padding:'4px 10px',borderRadius:'20px',fontSize:'12px',fontWeight:600,whiteSpace:'nowrap',background:item.chipBg,color:item.chipFg}}><span style={{width:'6px',height:'6px',borderRadius:'50%',background:item.chipFg}}/>{item.status}</span></span>
               <span style={S("display:flex; align-items:center; gap:5px; color:var(--text3); font-size:12px;")}><Svg w={14} h={14} d="M3 7h18M3 12h18M3 17h18"/>{item.evidenceCount} steps</span>
               <span style={S("text-align:right; color:var(--text3); font-size:12px;")}>{item.updated}</span>
             </button>
