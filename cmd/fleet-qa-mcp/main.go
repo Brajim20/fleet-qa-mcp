@@ -290,7 +290,12 @@ func runCLI(name string, args []string) {
 	case "log-search":
 		out, err = a.LogSearch(arg(pos, 0, "needle"), *ref, *pathspec)
 	case "request":
-		out, err = a.FleetRequest(*method, arg(pos, 0, "path"), *body, *confirm)
+		// Accept both `request <method> <path>` and `request <path>` (method via --method).
+		if len(pos) >= 2 {
+			out, err = a.FleetRequest(pos[0], pos[1], *body, *confirm)
+		} else {
+			out, err = a.FleetRequest(*method, arg(pos, 0, "path"), *body, *confirm)
+		}
 	case "browser-eval":
 		out, err = a.BrowserEval(arg(pos, 0, "url"), arg(pos, 1, "js"), *shot)
 	case "issue":

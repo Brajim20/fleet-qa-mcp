@@ -62,8 +62,8 @@ func (a *App) Whoami() (string, error) {
 
 func (a *App) CodeAtRev(path, revArg string) (string, error) {
 	rev, rerr := a.ResolveRev(revArg)
-	if rev == "" {
-		return "", rerr
+	if rev == "" || rerr != nil {
+		return "", rerr // can't operate on a rev that isn't in the local object store
 	}
 	out, err := gitcode.ShowAtRev(a.Repo, rev, path)
 	if err != nil {
@@ -74,8 +74,8 @@ func (a *App) CodeAtRev(path, revArg string) (string, error) {
 
 func (a *App) GrepCode(pattern, pathspec, revArg string) (string, error) {
 	rev, rerr := a.ResolveRev(revArg)
-	if rev == "" {
-		return "", rerr
+	if rev == "" || rerr != nil {
+		return "", rerr // can't operate on a rev that isn't in the local object store
 	}
 	out, err := gitcode.GrepAtRev(a.Repo, rev, pattern, pathspec)
 	if err != nil {
@@ -89,18 +89,14 @@ func (a *App) GrepCode(pattern, pathspec, revArg string) (string, error) {
 
 func (a *App) IsInBuild(commit string) (string, error) {
 	rev, rerr := a.ResolveRev("")
-	if rev == "" {
-		return "", rerr
+	if rev == "" || rerr != nil {
+		return "", rerr // can't operate on a rev that isn't in the local object store
 	}
 	in, err := gitcode.IsAncestor(a.Repo, commit, rev)
 	if err != nil {
 		return "", err
 	}
-	note := ""
-	if rerr != nil {
-		note = " (warning: " + rerr.Error() + ")"
-	}
-	return fmt.Sprintf("%s in deployed build %s: %v%s", short(commit), short(rev), in, note), nil
+	return fmt.Sprintf("%s in deployed build %s: %v", short(commit), short(rev), in), nil
 }
 
 func (a *App) LogSearch(needle, ref, pathspec string) (string, error) {
