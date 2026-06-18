@@ -678,7 +678,7 @@ class Studio extends React.Component {
                     <div style={step.connectorStyle}/>
                   </div>
                   <div style={S("flex:1; min-width:0; margin-bottom:12px;")}>
-                    <button onClick={step.onToggle} style={S("width:100%; display:flex; align-items:center; gap:12px; text-align:left; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:13px 16px; color:var(--text2);")}>
+                    <button onClick={step.onToggle} style={{...S("width:100%; display:flex; align-items:center; gap:12px; text-align:left; background:var(--surface); border:1px solid var(--border); padding:13px 16px; color:var(--text2);"), borderRadius: step._open ? '8px 8px 0 0' : '8px'}}>
                       <span style={S("color:var(--text3); font-family:var(--font-mono); font-size:11px; flex:none;")}>{step.tool}</span>
                       <span style={S("color:var(--text); font-weight:600; font-size:13.5px; flex:none;")}>{step.title}</span>
                       <span style={S("color:var(--text3); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0;")}>— {step.summary}</span>
