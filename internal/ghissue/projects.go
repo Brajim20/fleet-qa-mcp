@@ -92,9 +92,22 @@ func mergeProjectStatuses(into map[int]string, token string, numbers []int) {
 		}
 		for _, node := range item.ProjectItems.Nodes {
 			if node.S != nil && node.S.Name != "" {
-				into[n] = node.S.Name // first board with a Status wins
+				into[n] = normalizeBoardStatus(node.S.Name) // first board with a Status wins
 				break
 			}
 		}
 	}
+}
+
+// normalizeBoardStatus drops the leading emoji/symbol prefix Fleet uses on its
+// Project board statuses (plus any zero-width / variation-selector marks, which
+// all sort before the first ASCII letter), leaving clean text:
+// "✅ Ready for release" → "Ready for release", "🦤 In review" → "In review".
+func normalizeBoardStatus(s string) string {
+	for i, r := range s {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+			return strings.TrimSpace(s[i:])
+		}
+	}
+	return strings.TrimSpace(s)
 }

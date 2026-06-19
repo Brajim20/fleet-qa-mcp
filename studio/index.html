@@ -115,14 +115,19 @@ class Studio extends React.Component {
   // Status chip colors. GitHub Project board statuses (when a read:project token
   // is available) come first; the label-derived fallbacks follow.
   STATUS_CHIP = {
-    // Project board columns
+    // GitHub Project board columns (emoji prefixes stripped server-side)
+    'Inbox':{bg:'rgba(139,143,162,.18)',fg:'#9ea2b5'},
+    'Waiting':{bg:'rgba(139,143,162,.18)',fg:'#9ea2b5'},
+    'Blocked':{bg:'rgba(255,92,131,.15)',fg:'#ff5c83'},
+    'Ready to estimate':{bg:'rgba(92,171,223,.16)',fg:'#5cabdf'},
+    'Ready':{bg:'rgba(92,171,223,.16)',fg:'#5cabdf'},
     'In progress':{bg:'rgba(106,103,254,.16)',fg:'#8b89ff'},
     'In review':{bg:'rgba(201,141,239,.16)',fg:'#c98def'},
     'Awaiting QA':{bg:'rgba(235,188,67,.16)',fg:'#d6a32e'},
-    'Ready to release':{bg:'rgba(58,239,196,.15)',fg:'#3aefc4'},
+    'Ready for release':{bg:'rgba(58,239,196,.15)',fg:'#3aefc4'},
     'Done':{bg:'rgba(61,182,123,.16)',fg:'#3db67b'},
-    // Label-derived fallback statuses
-    'Release':{bg:'rgba(106,103,254,.16)',fg:'#8b89ff'},
+    // Label-derived fallback statuses (no read:project token)
+    'Release':{bg:'rgba(58,239,196,.15)',fg:'#3aefc4'},
     'In QA':{bg:'rgba(235,188,67,.16)',fg:'#d6a32e'},
     'Product':{bg:'rgba(201,141,239,.16)',fg:'#c98def'},
     'Reproduce':{bg:'rgba(235,188,67,.16)',fg:'#d6a32e'},
