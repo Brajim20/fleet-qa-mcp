@@ -170,13 +170,14 @@ func (s *Server) handleInvestigate(w http.ResponseWriter, r *http.Request) {
 	}
 	var in struct {
 		Issue string `json:"issue"`
+		Mode  string `json:"mode"` // ""|reproduce|testplan
 	}
 	_ = json.NewDecoder(r.Body).Decode(&in)
 	if in.Issue == "" {
 		writeErr(w, 400, "missing 'issue'")
 		return
 	}
-	rep := s.app.Investigate(in.Issue, s.shotDir, "/shots")
+	rep := s.app.Investigate(in.Issue, in.Mode, s.shotDir, "/shots")
 	if rep.Number > 0 {
 		s.mu.Lock()
 		s.runs[rep.Number] = &storedRun{Report: rep, RanAt: time.Now(), Verdict: rep.Status}

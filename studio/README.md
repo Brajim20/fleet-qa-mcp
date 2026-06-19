@@ -48,6 +48,17 @@ autonomous agent is in the loop.
 What to grep / which API to hit is auto-derived from the issue text (heuristics in
 `internal/qa/investigate.go`); the human owns the verdict.
 
+### Reproduce / Run test plan
+The queue's action button is type-aware, and the detail view offers the same:
+- **Reproduce** (bugs) — parses the ticket's *Steps to reproduce* and performs each
+  against the live build, in order.
+- **Run test plan** (stories) — parses the story's *Test plan* and executes each item.
+
+With an `ANTHROPIC_API_KEY`, the agent actually follows each prose step via the tools
+and reports pass/fail. Without one, it performs the automatable parts of each step
+(any API call or page nav it names, with a screenshot) and lists the rest as manual
+checks — honest about what it could and couldn't drive.
+
 ### The QA loop
 Beyond investigating one issue, LIVE mode covers the workflow end-to-end:
 

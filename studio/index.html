@@ -189,14 +189,16 @@ class Studio extends React.Component {
   // The deterministic pipeline's phases — cycled in the busy overlay to give a
   // real sense of progress during the (~30s) investigation call.
   BUSY_PHASES = ['Fetching the issue','Resolving the deployed build','Reproducing — live API + real browser','Reading source at the deployed revision','Released or unreleased?','Drafting the result'];
-  runLive = (issueRef) => {
+  runLive = (issueRef) => this.runMode(issueRef, '');
+  runMode = (issueRef, mode) => {
     const m = (issueRef||'').match(/(\d{3,7})/);
     const label = m ? '#'+m[1] : 'issue';
+    const verb = mode==='reproduce' ? 'Reproducing ' : mode==='testplan' ? 'Running the test plan for ' : 'Investigating ';
     clearInterval(this._bp);
-    this.setState({ busy:true, busyPhase:0, busyMsg:'Investigating '+label+' against '+INSTANCE_HOST });
+    this.setState({ busy:true, busyPhase:0, busyMsg: verb + label + ' against ' + INSTANCE_HOST });
     this._bp = setInterval(() => this.setState(s => ({ busyPhase: Math.min(s.busyPhase+1, this.BUSY_PHASES.length-1) })), 2600);
     const done = () => clearInterval(this._bp);
-    fetch('/api/investigate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ issue: issueRef }) })
+    fetch('/api/investigate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ issue: issueRef, mode }) })
       .then(r=>r.json())
       .then(rep => {
         done();
@@ -1026,7 +1028,10 @@ class Studio extends React.Component {
               <div className="qa-shimmer" style={{height:'30px',width:'92px',justifySelf:'end'}}/>
             </div>
           ))}
-          {!v.queueLoading && rows.map(item=>{ const c=this.STATUS_CHIP[item.status]||this.STATUS_CHIP['Triage']; return (
+          {!v.queueLoading && rows.map(item=>{ const c=this.STATUS_CHIP[item.status]||this.STATUS_CHIP['Triage'];
+            const lbls=item.labels||[];
+            const act = lbls.indexOf('bug')>=0 ? {label:'Reproduce',mode:'reproduce'} : lbls.indexOf('story')>=0 ? {label:'Test plan',mode:'testplan'} : {label:'Investigate',mode:''};
+            return (
             <div key={item.number} style={S("display:grid; grid-template-columns:64px minmax(0,1fr) 120px 150px; gap:16px; align-items:center; padding:13px 20px; border-bottom:1px solid var(--border);")}>
               <a href={"https://github.com/fleetdm/fleet/issues/"+item.number} target="_blank" rel="noopener" style={S("font-family:var(--font-mono); font-size:12.5px; color:var(--accent);")}>#{item.number}</a>
               <span style={S("min-width:0;")}>
@@ -1034,7 +1039,7 @@ class Studio extends React.Component {
                 <span style={S("display:block; color:var(--text3); font-size:11.5px; margin-top:2px;")}>{item.group||'—'} · reported by {item.reporter}{item.milestone?' · 🏷 '+item.milestone:''}</span>
               </span>
               <span><span style={{display:'inline-flex',alignItems:'center',gap:'6px',padding:'4px 10px',borderRadius:'20px',fontSize:'11.5px',fontWeight:600,whiteSpace:'nowrap',background:c.bg,color:c.fg}}><span style={{width:'6px',height:'6px',borderRadius:'50%',background:c.fg}}/>{item.status}</span></span>
-              <button onClick={()=>this.runLive(String(item.number))} style={S("justify-self:end; height:32px; padding:0 14px; background:var(--accent); color:#1a1c21; border:none; border-radius:6px; font-weight:600; font-size:12.5px;")}>Investigate</button>
+              <button onClick={()=>this.runMode(String(item.number), act.mode)} style={S("justify-self:end; height:32px; padding:0 14px; background:var(--accent); color:#1a1c21; border:none; border-radius:6px; font-weight:600; font-size:12.5px;")}>{act.label}</button>
             </div>
           );})}
           {!v.queueLoading && rows.length===0 && <div style={S("padding:30px; text-align:center; color:var(--text3); font-size:13px;")}>No open issues match this filter.</div>}
@@ -1095,9 +1100,13 @@ class Studio extends React.Component {
         <div style={S("display:grid; grid-template-columns:1fr 320px; gap:28px; align-items:start;")}>
           {/* TIMELINE */}
           <div>
-            <div style={S("display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;")}>
+            <div style={S("display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:14px; flex-wrap:wrap;")}>
               <span style={S("color:var(--text); font-weight:600; font-size:15px;")}>Evidence timeline</span>
-              <button onClick={()=>this.runLive(String(n))} style={S("height:30px; padding:0 12px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text2); font-size:12px;")}>Re-run</button>
+              <div style={S("display:flex; gap:6px;")}>
+                {(rep.labels||[]).indexOf('bug')>=0 && <button onClick={()=>this.runMode(String(n),'reproduce')} title="Perform the ticket's Steps to reproduce against the live build" style={S("height:30px; padding:0 12px; background:var(--accent-tint); border:1px solid var(--accent); border-radius:6px; color:var(--accent); font-weight:600; font-size:12px;")}>Reproduce steps</button>}
+                {(rep.labels||[]).indexOf('story')>=0 && <button onClick={()=>this.runMode(String(n),'testplan')} title="Run the story's Test plan against the live build" style={S("height:30px; padding:0 12px; background:var(--accent-tint); border:1px solid var(--accent); border-radius:6px; color:var(--accent); font-weight:600; font-size:12px;")}>Run test plan</button>}
+                <button onClick={()=>this.runLive(String(n))} style={S("height:30px; padding:0 12px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text2); font-size:12px;")}>Re-run</button>
+              </div>
             </div>
             <div style={S("display:flex; flex-direction:column;")}>
               {rep.steps.map((step,i)=>{

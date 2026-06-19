@@ -79,7 +79,7 @@ func agentTools() []llm.Tool {
 // tools to call; each call is recorded as a timeline step so the UI shows
 // exactly what it did. Returns an error only on a hard failure (e.g. the model
 // never finished) so the caller can fall back to the heuristic engine.
-func (a *App) investigateAgentic(c *llm.Client, ref, shotDir, shotURLBase string) (*Report, error) {
+func (a *App) investigateAgentic(c *llm.Client, ref, mode, shotDir, shotURLBase string) (*Report, error) {
 	num := parseIssueNumber(ref)
 	rep := &Report{Number: num, Status: "In progress", Instance: hostOf(a.Inst.URL)}
 
@@ -198,11 +198,32 @@ func (a *App) investigateAgentic(c *llm.Client, ref, shotDir, shotURLBase string
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
 
-	userMsg := fmt.Sprintf("Investigate this issue:\n\nTitle: %s\nLabels: %s\nReporter: %s\nURL: %s\n\nBody:\n%s\n\nTarget: %s — Fleet %s (rev %s, %s).",
-		issue.Title, strings.Join(issue.Labels, ", "), issue.Reporter, issue.HTMLURL, clip(issue.Body, 4000),
+	system := agentSystem
+	task := "Investigate this issue:"
+	if mode == "reproduce" || mode == "testplan" {
+		label, steps := guidedSteps(issue.Body, mode)
+		if len(steps) > 0 {
+			var sb strings.Builder
+			for i, st := range steps {
+				fmt.Fprintf(&sb, "%d. %s\n", i+1, st)
+			}
+			if mode == "testplan" {
+				system = agentSystem + "\n\nThis is a STORY. Execute its test plan below against the live build, performing each item with the tools. Verdict: \"Fixed\" if the acceptance criteria pass, \"Confirmed bug\" if any item fails."
+				task = "Run this story's test plan, executing each item against the live build:\n\n" + sb.String()
+			} else {
+				system = agentSystem + "\n\nReproduce this BUG by performing its steps below against the live build, in order, using the tools. Verdict: \"Confirmed bug\" if it reproduces, \"Cannot reproduce\" if it doesn't, \"Fixed\" if the fix is clearly present."
+				task = "Reproduce this bug by performing these steps against the live build:\n\n" + sb.String()
+			}
+			rep.Steps = append(rep.Steps, StepResult{Kind: "plan", Title: label, Tool: "parse", Status: "ok",
+				Summary: fmt.Sprintf("%d steps from the ticket — executing each", len(steps)), Detail: sb.String()})
+		}
+	}
+
+	userMsg := fmt.Sprintf("%s\n\nTitle: %s\nLabels: %s\nReporter: %s\nURL: %s\n\nBody:\n%s\n\nTarget: %s — Fleet %s (rev %s, %s).",
+		task, issue.Title, strings.Join(issue.Labels, ", "), issue.Reporter, issue.HTMLURL, clip(issue.Body, 4000),
 		rep.Instance, rep.Version, short(rep.Rev), rep.Tier)
 
-	_, _, err := c.RunToolLoop(context.Background(), agentSystem,
+	_, _, err := c.RunToolLoop(context.Background(), system,
 		[]llm.Message{{Role: "user", Content: []llm.Block{{Type: "text", Text: userMsg}}}},
 		agentTools(), dispatch, agentMaxTurns)
 	if err != nil {

@@ -62,17 +62,27 @@ type Report struct {
 // shotDir is where browser screenshots are written; shotURLBase is the URL
 // prefix the HTTP layer serves them under (e.g. "/shots"). Pass "" for both to
 // skip screenshots.
-func (a *App) Investigate(ref, shotDir, shotURLBase string) *Report {
+// mode "" runs the general investigation; "reproduce" follows a bug's steps to
+// reproduce; "testplan" runs a story's test plan.
+func (a *App) Investigate(ref, mode, shotDir, shotURLBase string) *Report {
 	if c, ok := llm.NewFromEnv(); ok {
-		if rep, err := a.investigateAgentic(c, ref, shotDir, shotURLBase); err == nil {
+		if rep, err := a.investigateAgentic(c, ref, mode, shotDir, shotURLBase); err == nil {
 			return rep
 		} else {
 			// Agent failed (bad key, rate limit, no verdict) — degrade to the
 			// deterministic engine rather than returning nothing.
-			rep = a.investigateHeuristic(ref, shotDir, shotURLBase)
+			rep = a.heuristic(ref, mode, shotDir, shotURLBase)
 			rep.Error = strings.TrimSpace("agent fell back to heuristic engine: " + err.Error())
 			return rep
 		}
+	}
+	return a.heuristic(ref, mode, shotDir, shotURLBase)
+}
+
+// heuristic picks the deterministic engine for the mode.
+func (a *App) heuristic(ref, mode, shotDir, shotURLBase string) *Report {
+	if mode == "reproduce" || mode == "testplan" {
+		return a.investigateGuidedHeuristic(ref, mode, shotDir, shotURLBase)
 	}
 	return a.investigateHeuristic(ref, shotDir, shotURLBase)
 }
