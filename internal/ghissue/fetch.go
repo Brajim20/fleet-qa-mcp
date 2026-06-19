@@ -12,13 +12,14 @@ import (
 
 // Issue is the subset of a GitHub issue we use during an investigation.
 type Issue struct {
-	Number   int      `json:"number"`
-	Title    string   `json:"title"`
-	Body     string   `json:"body"`
-	Reporter string   `json:"reporter"`
-	State    string   `json:"state"`
-	Labels   []string `json:"labels"`
-	HTMLURL  string   `json:"html_url"`
+	Number    int      `json:"number"`
+	Title     string   `json:"title"`
+	Body      string   `json:"body"`
+	Reporter  string   `json:"reporter"`
+	State     string   `json:"state"`
+	Labels    []string `json:"labels"`
+	Milestone string   `json:"milestone"` // milestone title, e.g. "4.88.0", or ""
+	HTMLURL   string   `json:"html_url"`
 }
 
 // ghIssueResp mirrors the GitHub REST API issue payload.
@@ -34,6 +35,55 @@ type ghIssueResp struct {
 	Labels []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
+	Milestone *struct {
+		Title string `json:"title"`
+	} `json:"milestone"`
+}
+
+// milestoneTitle is "" when the issue has no milestone.
+func (r ghIssueResp) milestoneTitle() string {
+	if r.Milestone != nil {
+		return r.Milestone.Title
+	}
+	return ""
+}
+
+// Milestone is an open repo milestone (a release like "4.88.0").
+type Milestone struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Open   int    `json:"openIssues"`
+}
+
+// Milestones returns the repo's open milestones, soonest-due first.
+func Milestones() ([]Milestone, error) {
+	req, _ := http.NewRequest("GET", "https://api.github.com/repos/fleetdm/fleet/milestones?state=open&sort=due_on&direction=asc&per_page=50", nil)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	if tok := authToken(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := ghClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("GitHub returned HTTP %d", resp.StatusCode)
+	}
+	var raw []struct {
+		Number     int    `json:"number"`
+		Title      string `json:"title"`
+		OpenIssues int    `json:"open_issues"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]Milestone, 0, len(raw))
+	for _, m := range raw {
+		out = append(out, Milestone{Number: m.Number, Title: m.Title, Open: m.OpenIssues})
+	}
+	return out, nil
 }
 
 var ghClient = &http.Client{Timeout: 20 * time.Second}
@@ -80,24 +130,29 @@ func Fetch(number int) (*Issue, error) {
 		labels = append(labels, l.Name)
 	}
 	return &Issue{
-		Number:   r.Number,
-		Title:    r.Title,
-		Body:     strings.ReplaceAll(r.Body, "\r\n", "\n"),
-		Reporter: r.User.Login,
-		State:    r.State,
-		Labels:   labels,
-		HTMLURL:  r.HTMLURL,
+		Number:    r.Number,
+		Title:     r.Title,
+		Body:      strings.ReplaceAll(r.Body, "\r\n", "\n"),
+		Reporter:  r.User.Login,
+		State:     r.State,
+		Labels:    labels,
+		Milestone: r.milestoneTitle(),
+		HTMLURL:   r.HTMLURL,
 	}, nil
 }
 
 // List returns open fleetdm/fleet issues carrying the given label (e.g. "bug"),
-// most-recently-updated first, excluding pull requests. This is the QA queue.
-func List(label string, limit int) ([]*Issue, error) {
+// optionally scoped to a milestone (by number, "" for any), most-recently-updated
+// first, excluding pull requests. This is the QA queue.
+func List(label, milestone string, limit int) ([]*Issue, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 30
 	}
 	url := fmt.Sprintf("https://api.github.com/repos/fleetdm/fleet/issues?state=open&labels=%s&sort=updated&direction=desc&per_page=%d",
 		neturl.QueryEscape(label), limit)
+	if milestone != "" {
+		url += "&milestone=" + neturl.QueryEscape(milestone)
+	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -137,7 +192,7 @@ func List(label string, limit int) ([]*Issue, error) {
 		}
 		out = append(out, &Issue{
 			Number: r.Number, Title: r.Title, Reporter: r.User.Login,
-			State: r.State, Labels: labels, HTMLURL: r.HTMLURL,
+			State: r.State, Labels: labels, Milestone: r.milestoneTitle(), HTMLURL: r.HTMLURL,
 		})
 	}
 	return out, nil

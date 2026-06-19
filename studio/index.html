@@ -107,7 +107,7 @@ class Studio extends React.Component {
     live: false, liveList: [], liveReports: {}, busy: false, busyMsg: '',
     liveVerdict: {}, liveConfirmed: {},
     // QA queue (real open bugs) + generated-spec modal.
-    queue: [], queueLoading: false, queueLabel: 'bug', queueGroup: '#g-software', queueStatus: '', spec: null,
+    queue: [], queueLoading: false, queueLabel: 'bug', queueGroup: '#g-software', queueStatus: '', queueMilestone: '', milestones: [], spec: null,
   };
   // Fleet engineering product groups (the #g-* labels) for the queue filter,
   // matching the org's project boards (github.com/orgs/fleetdm/projects).
@@ -192,18 +192,23 @@ class Studio extends React.Component {
       openSteps: rep.steps.reduce((o,_,i)=>(o['live-'+i]=true, o), {}) });
   }
   // ---- QA queue ----
-  goQueue = () => { this.setState({ view:'queue', targetOpen:false, modal:null }); this.loadQueue(); };
+  goQueue = () => { this.setState({ view:'queue', targetOpen:false, modal:null }); this.loadQueue(); if (!this.state.milestones.length) this.loadMilestones(); };
   loadQueue(){
     this.setState({ queueLoading:true });
     let url = '/api/queue?label='+encodeURIComponent(this.state.queueLabel);
     if (this.state.queueGroup) url += '&group='+encodeURIComponent(this.state.queueGroup);
+    if (this.state.queueMilestone) url += '&milestone='+encodeURIComponent(this.state.queueMilestone);
     fetch(url)
       .then(r=>r.json())
       .then(d => this.setState({ queue:d.issues||[], queueLoading:false }))
       .catch(()=>this.setState({ queueLoading:false, toast:'Could not load the queue' }));
   }
-  setQueueGroup = (e) => this.setState({ queueGroup:e.target.value }, () => this.loadQueue()); // group filter is server-side
-  setQueueStatus = (e) => this.setState({ queueStatus:e.target.value });                       // status filter is client-side
+  loadMilestones(){
+    fetch('/api/milestones').then(r=>r.json()).then(d => this.setState({ milestones:d.milestones||[] })).catch(()=>{});
+  }
+  setQueueGroup = (e) => this.setState({ queueGroup:e.target.value }, () => this.loadQueue());         // server-side
+  setQueueMilestone = (e) => this.setState({ queueMilestone:e.target.value }, () => this.loadQueue()); // server-side
+  setQueueStatus = (e) => this.setState({ queueStatus:e.target.value });                                // client-side
   // ---- generated Playwright spec ----
   genSpec = (n) => {
     fetch('/api/spec', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ number:n }) })
@@ -550,7 +555,7 @@ class Studio extends React.Component {
       isDashboard:s.view==='dashboard', isNew:s.view==='new', isDetail:s.view==='detail', isQueue:s.view==='queue',
       crumb: s.view==='dashboard'?'Investigations':s.view==='new'?'New investigation':s.view==='queue'?'QA queue':(crumbNum?'#'+crumbNum:'Investigation'),
       navDashStyle:navBtn(s.view==='dashboard'), navNewStyle:navBtn(s.view==='new'), navQueueStyle:navBtn(s.view==='queue'),
-      queue:s.queue, queueLoading:s.queueLoading, queueLabel:s.queueLabel, queueGroup:s.queueGroup, queueStatus:s.queueStatus, spec:s.spec,
+      queue:s.queue, queueLoading:s.queueLoading, queueLabel:s.queueLabel, queueGroup:s.queueGroup, queueStatus:s.queueStatus, queueMilestone:s.queueMilestone, milestones:s.milestones, spec:s.spec,
       navRecent, investigations, stats, examples, targetOpen:s.targetOpen, live:s.live, agent:s.agent, liveActive,
       urlInput:s.urlInput, inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
       runLabel: s.running?'Running…':'Run remaining checks',
@@ -943,6 +948,11 @@ class Studio extends React.Component {
             <option value="">All groups</option>
             {this.GROUPS.map(g => <option key={g} value={g}>{g}</option>)}
           </select>
+          <span style={S("color:var(--text3); font-size:12px; margin-left:8px;")}>Milestone</span>
+          <select value={v.queueMilestone} onChange={this.setQueueMilestone} style={selStyle}>
+            <option value="">All milestones</option>
+            {v.milestones.map(m => <option key={m.number} value={m.number}>{m.title} ({m.openIssues})</option>)}
+          </select>
           <span style={S("color:var(--text3); font-size:12px; margin-left:8px;")}>Status</span>
           <select value={v.queueStatus} onChange={this.setQueueStatus} style={selStyle}>
             <option value="">All statuses</option>
@@ -957,7 +967,7 @@ class Studio extends React.Component {
               <a href={"https://github.com/fleetdm/fleet/issues/"+item.number} target="_blank" rel="noopener" style={S("font-family:var(--font-mono); font-size:12.5px; color:var(--accent);")}>#{item.number}</a>
               <span style={S("min-width:0;")}>
                 <span style={S("display:block; color:var(--text); font-weight:600; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{item.title}</span>
-                <span style={S("display:block; color:var(--text3); font-size:11.5px; margin-top:2px;")}>{item.group||'—'} · reported by {item.reporter}</span>
+                <span style={S("display:block; color:var(--text3); font-size:11.5px; margin-top:2px;")}>{item.group||'—'} · reported by {item.reporter}{item.milestone?' · 🏷 '+item.milestone:''}</span>
               </span>
               <span><span style={{display:'inline-flex',alignItems:'center',gap:'6px',padding:'4px 10px',borderRadius:'20px',fontSize:'11.5px',fontWeight:600,whiteSpace:'nowrap',background:c.bg,color:c.fg}}><span style={{width:'6px',height:'6px',borderRadius:'50%',background:c.fg}}/>{item.status}</span></span>
               <button onClick={()=>this.runLive(String(item.number))} style={S("justify-self:end; height:32px; padding:0 14px; background:var(--accent); color:#1a1c21; border:none; border-radius:6px; font-weight:600; font-size:12.5px;")}>Investigate</button>

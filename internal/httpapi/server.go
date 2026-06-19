@@ -57,6 +57,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/queue", s.handleQueue)
+	mux.HandleFunc("/api/milestones", s.handleMilestones)
 	mux.HandleFunc("/api/investigations", s.handleList)
 	mux.HandleFunc("/api/investigate", s.handleInvestigate)
 	mux.HandleFunc("/api/report", s.handleReport)
@@ -99,7 +100,7 @@ func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
 	if g := r.URL.Query().Get("group"); g != "" {
 		label = label + "," + g
 	}
-	issues, err := ghissue.List(label, 50)
+	issues, err := ghissue.List(label, r.URL.Query().Get("milestone"), 50)
 	if err != nil {
 		writeErr(w, 502, err.Error())
 		return
@@ -122,9 +123,20 @@ func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
 		list = append(list, map[string]any{
 			"number": i.Number, "title": i.Title, "reporter": i.Reporter,
 			"group": i.ProductGroup(), "labels": i.Labels, "status": status, "statusSource": source,
+			"milestone": i.Milestone,
 		})
 	}
 	writeJSON(w, 200, map[string]any{"label": label, "issues": list})
+}
+
+// handleMilestones returns the repo's open milestones for the queue filter.
+func (s *Server) handleMilestones(w http.ResponseWriter, r *http.Request) {
+	ms, err := ghissue.Milestones()
+	if err != nil {
+		writeErr(w, 502, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"milestones": ms})
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
