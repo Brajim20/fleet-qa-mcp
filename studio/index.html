@@ -269,9 +269,9 @@ class Studio extends React.Component {
     if (this.state.smokeRunning) return;
     this.setState({ smokeRunning:true, smokeRun:null });
     fetch('/api/smokes/run', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ group:this.state.smokeGroup }) })
-      .then(r=>r.json())
-      .then(run => this.setState({ smokeRunning:false, smokeRun:run }))
-      .catch(e => this.setState({ smokeRunning:false, toast:'Smoke run error: '+e.message }, this.flashToast));
+      .then(async r => { const run = await r.json().catch(()=>({})); if (!r.ok) return { error: run.error || ('Server returned HTTP '+r.status+(r.status===404?' — restart the server (make studio) to pick up the smoke runner.':'')), results:[] }; return run; })
+      .then(run => this.setState({ smokeRunning:false, smokeRun:{ results:[], ...run } }))
+      .catch(e => this.setState({ smokeRunning:false, smokeRun:{ error:'Could not reach the smoke runner: '+e.message, results:[] } }));
   };
 
   // ---- generated Playwright spec ----
@@ -1062,6 +1062,8 @@ class Studio extends React.Component {
           {run && !v.smokeRunning && (<>
             {run.error
               ? <div style={S("display:flex; gap:10px; padding:14px 16px; background:rgba(255,92,131,.10); border:1px solid rgba(255,92,131,.3); border-radius:8px; color:var(--text2); font-size:13px;")}><Svg w={16} h={16} stroke="var(--danger)" sw={2.2} style={S("flex:none; margin-top:1px;")} d="M12 9v4M12 17h.01|M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><span>{run.error}</span></div>
+              : (run.results||[]).length===0
+              ? <div style={S("display:flex; gap:10px; padding:14px 16px; background:var(--well); border:1px solid var(--border); border-radius:8px; color:var(--text2); font-size:13px;")}><Svg w={16} h={16} stroke="var(--warning)" sw={2.2} style={S("flex:none; margin-top:1px;")} d="M12 9v4M12 17h.01|M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><span>No specs ran. Usually the e2e auth setup failed — check that the instance is reachable and the admin token is valid (the server terminal logs the Playwright output).</span></div>
               : (<>
                 <div style={S("display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:18px;")}>
                   {[['Passed',run.passed,'#3db67b'],['Failed',run.failed,'#ff5c83'],['Skipped',run.skipped,'#8b8fa2'],['Duration',Math.round(run.durationMs/1000)+'s','#6a67fe']].map(([lbl,val,col])=>(

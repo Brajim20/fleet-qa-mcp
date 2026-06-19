@@ -5,6 +5,7 @@
 package smoke
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -96,21 +97,40 @@ func RunGroup(ctx context.Context, dir, group, instanceURL, token string) *Run {
 	if token != "" {
 		cmd.Env = append(cmd.Env, "FLEET_API_TOKEN="+token)
 	}
-	out, err := cmd.Output() // stdout = JSON report; stderr = logs (discarded)
-	report := extractJSON(out)
-	if len(report) == 0 {
-		msg := "smoke run produced no report"
-		if err != nil {
-			msg += ": " + err.Error()
-		}
-		if ctx.Err() != nil {
-			msg = "smoke run timed out"
-		}
-		run.Error = msg
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	runErr := cmd.Run() // playwright exits non-zero on failures — expected
+
+	if ctx.Err() != nil {
+		run.Error = "smoke run timed out after " + DefaultTimeout.String()
 		return run
 	}
-	parseReport(report, run)
+	report := extractJSON(stdout.Bytes())
+	if len(report) == 0 {
+		run.Error = "smoke run produced no report — Playwright output:\n" + tail(stderr.String(), 600)
+		if runErr != nil && stderr.Len() == 0 {
+			run.Error = "could not start the smoke run: " + runErr.Error()
+		}
+		return run
+	}
+	setupFailed := parseReport(report, run)
+	// No specs ran → almost always the e2e auth/setup step failed.
+	if run.Passed+run.Failed+run.Skipped == 0 {
+		if setupFailed {
+			run.Error = "the e2e auth setup failed, so no smoke specs ran — check the instance is reachable and the admin token is valid.\n\n" + tail(stderr.String(), 600)
+		} else {
+			run.Error = "no smoke specs matched/ran for this selection.\n\n" + tail(stderr.String(), 400)
+		}
+	}
 	return run
+}
+
+func tail(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) > n {
+		return "…" + s[len(s)-n:]
+	}
+	return s
 }
 
 // --- Playwright JSON reporter parsing ---
@@ -141,17 +161,22 @@ type pwSpec struct {
 	} `json:"tests"`
 }
 
-func parseReport(b []byte, run *Run) {
+// parseReport fills run from the Playwright JSON; returns true if the auth setup
+// spec failed (which means the smoke specs were skipped).
+func parseReport(b []byte, run *Run) (setupFailed bool) {
 	var r pwReport
 	if err := json.Unmarshal(b, &r); err != nil {
 		run.Error = "could not parse the Playwright report: " + err.Error()
-		return
+		return false
 	}
 	run.Duration = int(r.Stats.Duration)
 	var walk func(s pwSuite)
 	walk = func(s pwSuite) {
 		for _, sp := range s.Specs {
-			if strings.HasPrefix(sp.File, "setup/") { // skip the auth setup project
+			if strings.HasPrefix(sp.File, "setup/") { // the auth setup project
+				if !sp.Ok {
+					setupFailed = true
+				}
 				continue
 			}
 			res := Result{File: sp.File, Title: sp.Title}
@@ -187,6 +212,7 @@ func parseReport(b []byte, run *Run) {
 	for _, s := range r.Suites {
 		walk(s)
 	}
+	return setupFailed
 }
 
 // extractJSON returns the JSON object from stdout (from the first '{').
