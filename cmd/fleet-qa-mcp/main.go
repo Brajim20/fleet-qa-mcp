@@ -328,7 +328,7 @@ var subcommands = map[string]bool{
 	"log-search": true, "request": true, "browser-eval": true, "sample-frames": true,
 	"issue": true, "help": true,
 	// workflow commands (parity with the Studio web app)
-	"investigate": true, "queue": true, "smoke": true, "milestones": true, "spec": true,
+	"investigate": true, "queue": true, "smoke": true, "plan": true, "milestones": true, "spec": true,
 }
 
 func isSubcommand(s string) bool { return subcommands[s] }
@@ -413,7 +413,13 @@ func runCLI(name string, args []string) {
 		if len(pos) > 0 {
 			g = pos[0]
 		}
-		out, err = cmdSmoke(a, g)
+		out, err = cmdSmoke(a, g, *qstatus)
+	case "plan":
+		g := ""
+		if len(pos) > 0 {
+			g = pos[0]
+		}
+		out, err = cmdPlan(a, g)
 	case "milestones":
 		out, err = cmdMilestones(a)
 	case "spec":
@@ -444,7 +450,8 @@ func printCLIHelp() {
 Workflow (same as the Studio web app):
   investigate <issue> [--mode reproduce|testplan]      run a full investigation, print the report
   queue [--type bug|story|all] [--group #g-*] [--milestone V] [--status S]   list the QA backlog
-  smoke [group]                                        run the Playwright smoke suite, print pass/fail
+  smoke [group] [--status passed|failed|skipped]       run the Playwright smoke suite; print pass/fail matrix (with test titles), optionally filtered by status
+  plan [group|spec]                                    print a step-by-step outline of what each smoke test does (reads the spec source, doesn't run it)
   milestones                                           list open release milestones
   spec <issue>                                         generate a Playwright regression test
 
