@@ -41,6 +41,16 @@
   @keyframes qa-pulse{ 0%,100%{ opacity:1; } 50%{ opacity:.4; } }
   .qa-spin{ animation:qa-spin 1s linear infinite; }
   .qa-fade{ animation:qa-fade .25s ease; }
+  /* indeterminate top progress bar, shown while any /api/ call is in flight */
+  @keyframes qa-bar{ 0%{ left:-35%; width:35%; } 60%{ width:55%; } 100%{ left:100%; width:35%; } }
+  .qa-bar{ position:fixed; top:0; left:0; right:0; height:3px; background:transparent; z-index:120; overflow:hidden; }
+  .qa-bar > span{ position:absolute; top:0; height:100%; background:linear-gradient(90deg, transparent, var(--accent), var(--accent-over)); border-radius:0 3px 3px 0; animation:qa-bar 1.1s cubic-bezier(.4,0,.2,1) infinite; }
+  /* skeleton shimmer for loading lists */
+  @keyframes qa-shimmer{ 0%{ background-position:-450px 0; } 100%{ background-position:450px 0; } }
+  .qa-shimmer{ background-image:linear-gradient(90deg, var(--surface) 0px, var(--surface2) 80px, var(--surface) 160px); background-size:450px 100%; animation:qa-shimmer 1.15s linear infinite; border-radius:5px; }
+  /* bouncing dots for the investigation overlay */
+  @keyframes qa-bounce{ 0%,80%,100%{ transform:scale(.5); opacity:.45; } 40%{ transform:scale(1); opacity:1; } }
+  .qa-dot{ display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--accent); animation:qa-bounce 1.2s ease-in-out infinite; }
   .qa textarea{ font-family:var(--font-mono); }
   .qa button{ font-family:var(--font-sans); cursor:pointer; }
   .qa a{ text-decoration:none; }
@@ -104,8 +114,8 @@ class Studio extends React.Component {
     inst: { version: '4.87.0-rc.2606171916', rev: '9c17a71c43', tier: 'Premium', built: 'Jun 17, 2026 19:16 UTC', connected: true },
     // LIVE mode — set true when served by the fleet-qa-mcp `serve` backend.
     // In live mode, investigations actually run against the deployed build.
-    live: false, liveList: [], liveReports: {}, busy: false, busyMsg: '',
-    liveVerdict: {}, liveConfirmed: {},
+    live: false, liveList: [], liveReports: {}, busy: false, busyMsg: '', busyPhase: 0,
+    liveVerdict: {}, liveConfirmed: {}, pending: 0,
     // QA queue (real open bugs) + generated-spec modal.
     queue: [], queueLoading: false, queueType: 'bug', queueGroup: '#g-software', queueStatus: '', queueMilestone: '', milestones: [], spec: null,
   };
@@ -136,6 +146,18 @@ class Studio extends React.Component {
   };
 
   componentDidMount(){
+    // Drive the top progress bar off in-flight /api/ calls — one place, every
+    // callback. Wraps fetch so individual call sites stay unchanged.
+    if (!window.__qaFetchWrapped) {
+      const orig = window.fetch.bind(window);
+      window.fetch = (...args) => {
+        const u = args[0];
+        const track = typeof u === 'string' && u.indexOf('/api/') === 0;
+        if (track) this.setState(s => ({ pending: s.pending + 1 }));
+        return orig(...args).finally(() => { if (track) this.setState(s => ({ pending: Math.max(0, s.pending - 1) })); });
+      };
+      window.__qaFetchWrapped = true;
+    }
     // Is the fleet-qa-mcp backend serving us? If so, switch to LIVE mode and
     // drive real investigations. If not (e.g. GitHub Pages), stay in demo mode
     // with the mock data, and best-effort read the instance version directly.
@@ -164,20 +186,27 @@ class Studio extends React.Component {
     fetch('/api/investigations').then(r=>r.json())
       .then(d => this.setState({ liveList: d.investigations || [] })).catch(()=>{});
   }
+  // The deterministic pipeline's phases — cycled in the busy overlay to give a
+  // real sense of progress during the (~30s) investigation call.
+  BUSY_PHASES = ['Fetching the issue','Resolving the deployed build','Reproducing — live API + real browser','Reading source at the deployed revision','Released or unreleased?','Drafting the result'];
   runLive = (issueRef) => {
     const m = (issueRef||'').match(/(\d{3,7})/);
     const label = m ? '#'+m[1] : 'issue';
-    this.setState({ busy:true, busyMsg:'Investigating '+label+' against '+INSTANCE_HOST+' — fetching issue, hitting the live API, driving Chromium, grepping the deployed source…' });
+    clearInterval(this._bp);
+    this.setState({ busy:true, busyPhase:0, busyMsg:'Investigating '+label+' against '+INSTANCE_HOST });
+    this._bp = setInterval(() => this.setState(s => ({ busyPhase: Math.min(s.busyPhase+1, this.BUSY_PHASES.length-1) })), 2600);
+    const done = () => clearInterval(this._bp);
     fetch('/api/investigate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ issue: issueRef }) })
       .then(r=>r.json())
       .then(rep => {
+        done();
         if (rep.error && (!rep.steps || !rep.steps.length)) { this.setState({ busy:false, toast:'Investigation failed: '+rep.error }); this.flashToast(); return; }
         this.setState(s => ({ busy:false, view:'detail', activeId:rep.number, modal:null, targetOpen:false,
           liveReports:{...s.liveReports, [rep.number]:rep},
           openSteps: rep.steps.reduce((o,_,i)=>(o['live-'+i]=i<2, o), {}) }));
         this.loadLiveList();
       })
-      .catch(e => { this.setState({ busy:false, toast:'Investigation error: '+e.message }); this.flashToast(); });
+      .catch(e => { done(); this.setState({ busy:false, toast:'Investigation error: '+e.message }); this.flashToast(); });
   };
   openLive = (n) => {
     const cached = this.state.liveReports[n];
@@ -316,7 +345,7 @@ class Studio extends React.Component {
     this.setState({ running:true }); let tick = 2;
     this._ri = setInterval(()=>{ tick+=1; this.setState({runTick:tick}); if(tick>=7){clearInterval(this._ri); this.setState({running:false});} },650);
   };
-  componentWillUnmount(){ clearInterval(this._ri); clearTimeout(this._tt); }
+  componentWillUnmount(){ clearInterval(this._ri); clearInterval(this._bp); clearTimeout(this._tt); }
 
   buildSteps(inv){
     if (inv.kindSet==='rich-fixed') return this.stepsFixed();
@@ -663,14 +692,35 @@ class Studio extends React.Component {
 
         {v.draftOpen && this.renderDraft(v)}
         {v.spec && this.state.modal==='spec' && this.renderSpec(v)}
+        {this.state.pending>0 && <div className="qa-bar"><span/></div>}
         {this.state.busy && (
           <div className="qa-fade" style={S("position:fixed; inset:0; background:rgba(15,18,38,.62); display:flex; align-items:center; justify-content:center; z-index:90; padding:32px;")}>
-            <div style={S("max-width:440px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:26px 28px; box-shadow:0 12px 40px rgba(0,0,0,.4);")}>
-              <div style={S("display:flex; align-items:center; gap:12px; margin-bottom:12px;")}>
-                <span className="qa-spin" style={{width:'20px',height:'20px',border:'2.5px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',display:'block',flex:'none'}}/>
-                <span style={S("color:var(--text); font-weight:600; font-size:15px;")}>Running investigation…</span>
+            <div style={S("width:440px; max-width:100%; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px 26px; box-shadow:0 12px 40px rgba(0,0,0,.4);")}>
+              <div style={S("display:flex; align-items:center; gap:10px; margin-bottom:6px;")}>
+                <FleetLogo size={20}/>
+                <span style={S("color:var(--text); font-weight:600; font-size:15px;")}>Running investigation</span>
+                <span style={S("margin-left:auto; display:inline-flex; gap:4px; align-items:center;")}>
+                  <span className="qa-dot"/><span className="qa-dot" style={{animationDelay:'.15s'}}/><span className="qa-dot" style={{animationDelay:'.3s'}}/>
+                </span>
               </div>
-              <p style={S("color:var(--text3); font-size:12.5px; line-height:1.6; margin:0;")}>{this.state.busyMsg}</p>
+              <p style={S("color:var(--text3); font-size:12px; margin:0 0 16px;")}>{this.state.busyMsg}</p>
+              <div style={S("display:flex; flex-direction:column; gap:9px;")}>
+                {this.BUSY_PHASES.map((ph,i)=>{
+                  const done=i<this.state.busyPhase, active=i===this.state.busyPhase;
+                  return (
+                    <div key={i} style={{display:'flex',alignItems:'center',gap:'10px',opacity: done||active?1:.4,transition:'opacity .3s'}}>
+                      <span style={{width:'18px',height:'18px',borderRadius:'50%',flex:'none',display:'flex',alignItems:'center',justifyContent:'center',border:'2px solid',borderColor: done||active?'var(--accent)':'var(--border)',background: done?'var(--accent)':'transparent'}}>
+                        {done
+                          ? <Svg w={11} h={11} sw={3} stroke="#1a1c21" d="M20 6 9 17l-5-5"/>
+                          : active
+                            ? <span className="qa-spin" style={{width:'9px',height:'9px',border:'2px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',display:'block'}}/>
+                            : null}
+                      </span>
+                      <span style={{fontSize:'12.5px',fontWeight: active?600:500,color: done||active?'var(--text)':'var(--text3)'}}>{ph}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
@@ -967,9 +1017,16 @@ class Studio extends React.Component {
           </select>
           <span style={S("margin-left:auto; color:var(--text3); font-size:12px;")}>{rows.length} issue{rows.length===1?'':'s'}</span>
         </div>
-        {v.queueLoading && <div style={S("color:var(--text3); font-size:13px; padding:24px 0;")}>Loading…</div>}
         <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;")}>
-          {rows.map(item=>{ const c=this.STATUS_CHIP[item.status]||this.STATUS_CHIP['Triage']; return (
+          {v.queueLoading && Array.from({length:7}).map((_,i)=>(
+            <div key={'sk'+i} style={S("display:grid; grid-template-columns:64px minmax(0,1fr) 120px 150px; gap:16px; align-items:center; padding:15px 20px; border-bottom:1px solid var(--border);")}>
+              <div className="qa-shimmer" style={{height:'12px',width:'42px'}}/>
+              <div><div className="qa-shimmer" style={{height:'12px',width:(62-i*4)+'%'}}/><div className="qa-shimmer" style={{height:'9px',width:'34%',marginTop:'7px'}}/></div>
+              <div className="qa-shimmer" style={{height:'20px',width:'92px',borderRadius:'20px'}}/>
+              <div className="qa-shimmer" style={{height:'30px',width:'92px',justifySelf:'end'}}/>
+            </div>
+          ))}
+          {!v.queueLoading && rows.map(item=>{ const c=this.STATUS_CHIP[item.status]||this.STATUS_CHIP['Triage']; return (
             <div key={item.number} style={S("display:grid; grid-template-columns:64px minmax(0,1fr) 120px 150px; gap:16px; align-items:center; padding:13px 20px; border-bottom:1px solid var(--border);")}>
               <a href={"https://github.com/fleetdm/fleet/issues/"+item.number} target="_blank" rel="noopener" style={S("font-family:var(--font-mono); font-size:12.5px; color:var(--accent);")}>#{item.number}</a>
               <span style={S("min-width:0;")}>
