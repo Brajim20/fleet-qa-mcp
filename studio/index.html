@@ -117,6 +117,7 @@ class Studio extends React.Component {
     live: false, liveList: [], liveReports: {}, busy: false, busyMsg: '', busyPhase: 0,
     liveVerdict: {}, liveConfirmed: {}, pending: 0,
     vw: (typeof window !== 'undefined' ? window.innerWidth : 1280), // drives responsive layout
+    navHidden: false, // manual sidebar hide toggle
     // QA queue (real open bugs) + generated-spec modal.
     queue: [], queueLoading: false, queueType: 'bug', queueGroup: '#g-software', queueStatus: '', queueMilestone: '', milestones: [], spec: null,
     // Smoke suite runner.
@@ -342,6 +343,7 @@ class Studio extends React.Component {
   goNew = () => this.setState({ view:'new', targetOpen:false, modal:null });
   toggleTheme = () => this.setState(s => ({ theme: s.theme==='dark'?'light':'dark' }));
   toggleTarget = () => this.setState(s => ({ targetOpen: !s.targetOpen }));
+  toggleNav = () => this.setState(s => ({ navHidden: !s.navHidden }));
   closeModal = () => this.setState({ modal:null });
   stop = (e) => e.stopPropagation();
 
@@ -573,7 +575,7 @@ class Studio extends React.Component {
     const compact = vw < 760;        // icon-only sidebar
     const stackDetail = vw < 1040;   // verdict panel drops below the timeline
     const statsCols = vw < 520 ? 1 : vw < 840 ? 2 : 4;
-    const sidebarW = compact ? 56 : 230;
+    const sidebarW = s.navHidden ? 0 : (compact ? 56 : 230);
     const navBtn = (active) => ({ display:'flex',alignItems:'center',justifyContent:compact?'center':'flex-start',gap:compact?'0':'10px',width:'100%',textAlign:'left',height:'38px',padding:compact?'0':'0 12px',borderRadius:'6px',border:'none',fontSize:'13.5px',fontWeight:600, background:active?'var(--accent-tint)':'transparent', color:active?'var(--accent)':'var(--text2)' });
     const chipFor = (st) => this.CHIP[st] || this.CHIP['In progress'];
     const baseInvs = s.live ? this.liveSource() : this.investigations;
@@ -632,7 +634,7 @@ class Studio extends React.Component {
       navDashStyle:navBtn(s.view==='dashboard'), navNewStyle:navBtn(s.view==='new'), navQueueStyle:navBtn(s.view==='queue'), navSmokesStyle:navBtn(s.view==='smokes'),
       queue:s.queue, queueLoading:s.queueLoading, queueType:s.queueType, queueGroup:s.queueGroup, queueStatus:s.queueStatus, queueMilestone:s.queueMilestone, milestones:s.milestones, spec:s.spec,
       smokeAvail:s.smokeAvail, smokeMsg:s.smokeMsg, smokeDir:s.smokeDir, smokeGroups:s.smokeGroups, smokeGroup:s.smokeGroup, smokeRun:s.smokeRun, smokeRunning:s.smokeRunning,
-      compact, stackDetail, statsCols, sidebarW,
+      compact, stackDetail, statsCols, sidebarW, navHidden:s.navHidden,
       navRecent, investigations, stats, examples, targetOpen:s.targetOpen, live:s.live, agent:s.agent, liveActive,
       urlInput:s.urlInput, inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
       runLabel: s.running?'Running…':'Run remaining checks',
@@ -647,6 +649,7 @@ class Studio extends React.Component {
     return (
       <div className={"qa "+v.themeClass} style={S("display:flex; height:100vh; width:100%; overflow:hidden; background:var(--bg); color:var(--text2); font-family:var(--font-sans); font-size:14px;")}>
         {/* SIDEBAR */}
+        {!v.navHidden && (
         <aside style={{...S("flex:none; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column;"), width:v.sidebarW+'px'}}>
           <div style={{...S("height:60px; flex:none; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--border);"), padding:v.compact?'0':'0 18px', justifyContent:v.compact?'center':'flex-start'}}>
             <FleetLogo size={26}/>
@@ -700,10 +703,14 @@ class Studio extends React.Component {
             </button>
           </div>
         </aside>
+        )}
 
         {/* MAIN */}
         <div style={S("flex:1; min-width:0; display:flex; flex-direction:column;")}>
-          <header style={S("height:60px; flex:none; border-bottom:1px solid var(--border); background:var(--surface); display:flex; align-items:center; padding:0 24px; gap:16px;")}>
+          <header style={S("height:60px; flex:none; border-bottom:1px solid var(--border); background:var(--surface); display:flex; align-items:center; padding:0 24px; gap:14px;")}>
+            <button onClick={this.toggleNav} title={v.navHidden?'Show tabs':'Hide tabs'} style={S("width:32px; height:32px; flex:none; border:1px solid var(--border); background:transparent; color:var(--text2); border-radius:6px; display:flex; align-items:center; justify-content:center;")}>
+              <Svg w={16} h={16}><path d="M3 6h18M3 12h18M3 18h18"/></Svg>
+            </button>
             <div style={S("display:flex; align-items:center; gap:8px; min-width:0; color:var(--text3); font-size:13px;")}>
               <span>Fleet QA Studio</span><span>/</span>
               <span style={S("color:var(--text); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{v.crumb}</span>
@@ -711,7 +718,7 @@ class Studio extends React.Component {
             <div style={S("margin-left:auto; position:relative;")}>
               <button onClick={this.toggleTarget} style={S("display:flex; align-items:center; gap:10px; height:38px; padding:0 12px; border:1px solid var(--border); background:var(--bg); border-radius:8px; color:var(--text2);")}>
                 <span style={S("position:relative; width:8px; height:8px; flex:none;")}><span style={S("position:absolute; inset:0; border-radius:50%; background:var(--success);")}/><span style={S("position:absolute; inset:-3px; border-radius:50%; border:1px solid var(--success); opacity:.4;")} className="qa-spin"/></span>
-                <span style={S("display:flex; flex-direction:column; align-items:flex-start; line-height:1.15;")}>
+                <span style={S("display:flex; flex-direction:column; align-items:flex-start; gap:3px; line-height:1.25;")}>
                   <span style={S("font-size:11px; color:var(--text3);")}>{INSTANCE_HOST}</span>
                   <span style={S("font-family:var(--font-mono); font-size:11.5px; color:var(--text);")}>{shortVer(v.inst.version)} · {v.inst.rev.slice(0,8)}</span>
                 </span>
