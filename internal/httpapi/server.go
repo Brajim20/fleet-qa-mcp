@@ -104,11 +104,24 @@ func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 502, err.Error())
 		return
 	}
+	// Prefer the real GitHub Project board status (needs a read:project token);
+	// fall back to the label-derived status per issue when unavailable.
+	nums := make([]int, len(issues))
+	for i, is := range issues {
+		nums[i] = is.Number
+	}
+	board := ghissue.ProjectStatuses(nums)
+
 	list := make([]map[string]any, 0, len(issues))
 	for _, i := range issues {
+		status := board[i.Number]
+		source := "board"
+		if status == "" {
+			status, source = ghissue.WorkflowStatus(i.Labels), "label"
+		}
 		list = append(list, map[string]any{
 			"number": i.Number, "title": i.Title, "reporter": i.Reporter,
-			"group": i.ProductGroup(), "labels": i.Labels, "status": ghissue.WorkflowStatus(i.Labels),
+			"group": i.ProductGroup(), "labels": i.Labels, "status": status, "statusSource": source,
 		})
 	}
 	writeJSON(w, 200, map[string]any{"label": label, "issues": list})

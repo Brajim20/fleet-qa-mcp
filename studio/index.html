@@ -112,10 +112,18 @@ class Studio extends React.Component {
   // Fleet engineering product groups (the #g-* labels) for the queue filter,
   // matching the org's project boards (github.com/orgs/fleetdm/projects).
   GROUPS = ['#g-software','#g-mdm','#g-security-compliance','#g-first-impressions','#g-orchestration','#g-power-to-pc'];
-  // Status chip colors, keyed by Fleet's workflow status (from process labels).
+  // Status chip colors. GitHub Project board statuses (when a read:project token
+  // is available) come first; the label-derived fallbacks follow.
   STATUS_CHIP = {
+    // Project board columns
+    'In progress':{bg:'rgba(106,103,254,.16)',fg:'#8b89ff'},
+    'In review':{bg:'rgba(201,141,239,.16)',fg:'#c98def'},
+    'Awaiting QA':{bg:'rgba(235,188,67,.16)',fg:'#d6a32e'},
+    'Ready to release':{bg:'rgba(58,239,196,.15)',fg:'#3aefc4'},
+    'Done':{bg:'rgba(61,182,123,.16)',fg:'#3db67b'},
+    // Label-derived fallback statuses
     'Release':{bg:'rgba(106,103,254,.16)',fg:'#8b89ff'},
-    'In QA':{bg:'rgba(61,182,123,.15)',fg:'#3db67b'},
+    'In QA':{bg:'rgba(235,188,67,.16)',fg:'#d6a32e'},
     'Product':{bg:'rgba(201,141,239,.16)',fg:'#c98def'},
     'Reproduce':{bg:'rgba(235,188,67,.16)',fg:'#d6a32e'},
     'Incoming':{bg:'rgba(139,143,162,.18)',fg:'#9ea2b5'},

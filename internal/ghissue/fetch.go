@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
-	"os"
 	"strings"
 	"time"
 )
@@ -53,7 +52,7 @@ func Fetch(number int) (*Issue, error) {
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+	if tok := authToken(); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	resp, err := ghClient.Do(req)
@@ -105,7 +104,7 @@ func List(label string, limit int) ([]*Issue, error) {
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+	if tok := authToken(); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	resp, err := ghClient.Do(req)
