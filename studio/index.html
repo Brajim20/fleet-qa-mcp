@@ -264,19 +264,22 @@ class Studio extends React.Component {
   setQueueMilestone = (e) => this.setState({ queueMilestone:e.target.value }, () => this.loadQueue()); // server-side
   setQueueStatus = (e) => this.setState({ queueStatus:e.target.value });                                // client-side
   // ---- smoke suite ----
-  goSmokes = () => { this.setState({ view:'smokes', targetOpen:false, modal:null }); if (this.state.smokeAvail===null) this.loadSmokes(); };
+  goSmokes = () => {
+    this.setState({ view:'smokes', targetOpen:false, modal:null });
+    if (this.state.smokeAvail===null) this.loadSmokes();
+    else if (this.state.smokeAvail && !this.state.smokePlan) this.loadPlan();
+  };
   loadSmokes(){
     fetch('/api/smokes').then(r=>r.json())
-      .then(d => this.setState({ smokeAvail:!!d.available, smokeMsg:d.message||'', smokeDir:d.dir||'', smokeGroups:d.groups||[] }))
+      .then(d => { this.setState({ smokeAvail:!!d.available, smokeMsg:d.message||'', smokeDir:d.dir||'', smokeGroups:d.groups||[] }); if (d.available) this.loadPlan(); })
       .catch(()=>this.setState({ smokeAvail:false, smokeMsg:'Could not reach the smoke runner' }));
   }
   setSmokeGroup = (e) => {
     // Switching suite invalidates the previous run's results (they were for a
-    // different suite) and the status filter. If a test plan is currently
-    // shown, refresh it for the newly-selected suite so the view stays in sync.
-    const reloadPlan = !!this.state.smokePlan && !this.state.smokePlan.error;
+    // different suite) and the status filter, and refreshes the test plan for
+    // the newly-selected suite — the plan always reflects the current suite.
     this.setState({ smokeGroup:e.target.value, smokeRun:null, smokeStatus:'', smokePlan:null }, () => {
-      if (reloadPlan) this.loadPlan();
+      if (this.state.smokeAvail) this.loadPlan();
     });
   };
   setSmokeStatus = (e) => this.setState({ smokeStatus:e.target.value });
@@ -1092,15 +1095,25 @@ class Studio extends React.Component {
             <button onClick={this.runSmokes} disabled={v.smokeRunning} style={S("height:34px; padding:0 18px; background:var(--accent); color:#1a1c21; border:none; border-radius:6px; font-weight:600; font-size:13px; opacity:"+(v.smokeRunning?'.6':'1')+";")}>
               {v.smokeRunning ? 'Running…' : 'Run smokes'}
             </button>
-            <button onClick={this.loadPlan} disabled={v.smokePlanLoading} title="See what each test does, without running it" style={S("height:34px; padding:0 14px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text2); font-size:12.5px; opacity:"+(v.smokePlanLoading?'.6':'1')+";")}>
-              {v.smokePlanLoading ? 'Loading…' : 'View test plan'}
-            </button>
             <span style={S("color:var(--text3); font-size:11.5px;")}>{v.smokeDir}</span>
           </div>
 
-          {v.smokePlan && (
+          {/* Test plan — auto-loads for the selected suite (no button needed). */}
+          {v.smokePlanLoading && (
+            <div style={S("display:flex; align-items:center; gap:10px; padding:14px 16px; background:var(--surface); border:1px solid var(--border); border-radius:8px; color:var(--text2); font-size:13px; margin-bottom:16px;")}>
+              <span className="qa-spin" style={{width:'16px',height:'16px',border:'2.5px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',display:'block',flex:'none'}}/>
+              <span>Loading the test plan for {v.smokeGroup||'all smoke tests'}…</span>
+            </div>
+          )}
+          {!v.smokePlanLoading && v.smokePlan && (
             v.smokePlan.error
               ? <div style={S("display:flex; gap:10px; padding:14px 16px; background:rgba(255,92,131,.10); border:1px solid rgba(255,92,131,.3); border-radius:8px; color:var(--text2); font-size:13px; margin-bottom:16px;")}><span>{v.smokePlan.error}</span></div>
+              : (v.smokePlan.plans||[]).length===0
+              ? <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:36px 18px; text-align:center; margin-bottom:18px;")}>
+                  <Svg w={24} h={24} stroke="var(--text3)" sw={1.8} style={S("margin:0 auto 10px;")} d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                  <div style={S("color:var(--text2); font-size:14px; font-weight:600; margin-bottom:4px;")}>No available test cases for this suite</div>
+                  <div style={S("color:var(--text3); font-size:12.5px;")}>No <b style={{color:'var(--text2)'}}>{v.smokeGroup||'smoke'}</b> specs define any tests yet.</div>
+                </div>
               : <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px 0; margin-bottom:18px;")}>
                   <div style={S("padding:8px 18px 12px; color:var(--text3); font-size:12px; border-bottom:1px solid var(--border);")}>Test plan — {(v.smokePlan.plans||[]).length} tests in <b style={{color:'var(--text2)'}}>{v.smokeGroup||'all smoke tests'}</b> (from the spec source, not a run)</div>
                   {(v.smokePlan.plans||[]).map((p,i)=>(
