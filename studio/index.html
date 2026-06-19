@@ -146,6 +146,20 @@ class Studio extends React.Component {
     'Incoming':{bg:'rgba(139,143,162,.18)',fg:'#9ea2b5'},
     'Triage':{bg:'rgba(139,143,162,.18)',fg:'#9ea2b5'},
   };
+  // Bright dark-mode fgs read as washed-out/too bright on the light surface —
+  // map them to a deeper shade (with a stronger tint) when the theme is light.
+  LIGHT_CHIP = {
+    '#3aefc4':{fg:'#0a8f6e',bg:'rgba(0,154,125,.13)'},
+    '#3db67b':{fg:'#1f9d63',bg:'rgba(31,157,99,.12)'},
+    '#5cabdf':{fg:'#2b7fb8',bg:'rgba(43,127,184,.12)'},
+    '#8b89ff':{fg:'#5b58e0',bg:'rgba(91,88,224,.12)'},
+    '#c98def':{fg:'#9b54d6',bg:'rgba(155,84,214,.12)'},
+  };
+  chipColors(status){
+    const c = this.STATUS_CHIP[status] || this.STATUS_CHIP['Triage'];
+    if (this.state.theme==='light' && this.LIGHT_CHIP[c.fg]) return this.LIGHT_CHIP[c.fg];
+    return c;
+  }
 
   componentDidMount(){
     // Drive the top progress bar off in-flight /api/ calls — one place, every
@@ -1121,7 +1135,7 @@ class Studio extends React.Component {
               <div className="qa-shimmer" style={{height:'30px',width:'92px',justifySelf:'end'}}/>
             </div>
           ))}
-          {!v.queueLoading && rows.map(item=>{ const c=this.STATUS_CHIP[item.status]||this.STATUS_CHIP['Triage'];
+          {!v.queueLoading && rows.map(item=>{ const c=this.chipColors(item.status);
             const lbls=item.labels||[];
             const act = lbls.indexOf('bug')>=0 ? {label:'Reproduce',mode:'reproduce'} : lbls.indexOf('story')>=0 ? {label:'Test plan',mode:'testplan'} : {label:'Investigate',mode:''};
             return (
