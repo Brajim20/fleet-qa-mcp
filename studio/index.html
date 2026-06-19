@@ -122,6 +122,7 @@ class Studio extends React.Component {
     queue: [], queueLoading: false, queueType: 'bug', queueGroup: '#g-software', queueStatus: '', queueMilestone: '', milestones: [], spec: null,
     // Smoke suite runner.
     smokeAvail: null, smokeMsg: '', smokeDir: '', smokeGroups: [], smokeGroup: '', smokeRun: null, smokeRunning: false,
+    smokeStatus: '', smokePlan: null, smokePlanLoading: false,
   };
   // Fleet engineering product groups (the #g-* labels) for the queue filter,
   // matching the org's project boards (github.com/orgs/fleetdm/projects).
@@ -269,7 +270,16 @@ class Studio extends React.Component {
       .then(d => this.setState({ smokeAvail:!!d.available, smokeMsg:d.message||'', smokeDir:d.dir||'', smokeGroups:d.groups||[] }))
       .catch(()=>this.setState({ smokeAvail:false, smokeMsg:'Could not reach the smoke runner' }));
   }
-  setSmokeGroup = (e) => this.setState({ smokeGroup:e.target.value });
+  setSmokeGroup = (e) => this.setState({ smokeGroup:e.target.value, smokePlan:null });
+  setSmokeStatus = (e) => this.setState({ smokeStatus:e.target.value });
+  loadPlan = () => {
+    if (this.state.smokePlanLoading) return;
+    this.setState({ smokePlanLoading:true, smokePlan:null });
+    fetch('/api/smokes/plan?group='+encodeURIComponent(this.state.smokeGroup))
+      .then(async r => { const d = await r.json().catch(()=>({})); if (!r.ok) return { error: d.error || ('HTTP '+r.status) }; return d; })
+      .then(d => this.setState({ smokePlanLoading:false, smokePlan:d }))
+      .catch(e => this.setState({ smokePlanLoading:false, smokePlan:{ error:'Could not load the test plan: '+e.message } }));
+  };
   runSmokes = () => {
     if (this.state.smokeRunning) return;
     this.setState({ smokeRunning:true, smokeRun:null });
@@ -634,6 +644,7 @@ class Studio extends React.Component {
       navDashStyle:navBtn(s.view==='dashboard'), navNewStyle:navBtn(s.view==='new'), navQueueStyle:navBtn(s.view==='queue'), navSmokesStyle:navBtn(s.view==='smokes'),
       queue:s.queue, queueLoading:s.queueLoading, queueType:s.queueType, queueGroup:s.queueGroup, queueStatus:s.queueStatus, queueMilestone:s.queueMilestone, milestones:s.milestones, spec:s.spec,
       smokeAvail:s.smokeAvail, smokeMsg:s.smokeMsg, smokeDir:s.smokeDir, smokeGroups:s.smokeGroups, smokeGroup:s.smokeGroup, smokeRun:s.smokeRun, smokeRunning:s.smokeRunning,
+      smokeStatus:s.smokeStatus, smokePlan:s.smokePlan, smokePlanLoading:s.smokePlanLoading,
       compact, stackDetail, statsCols, sidebarW, navHidden:s.navHidden,
       navRecent, investigations, stats, examples, targetOpen:s.targetOpen, live:s.live, agent:s.agent, liveActive,
       urlInput:s.urlInput, inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
@@ -1049,6 +1060,8 @@ class Studio extends React.Component {
     const selStyle = S("height:34px; padding:0 10px; background:var(--surface); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:12.5px;");
     const run = v.smokeRun;
     const dot = (st) => ({passed:'var(--success)',failed:'var(--danger)',skipped:'var(--text3)'}[st]||'var(--text3)');
+    const allRes = (run && run.results) || [];
+    const shown = v.smokeStatus ? allRes.filter(r=>r.status===v.smokeStatus) : allRes;
     return (
       <div className="qa-fade" style={S("max-width:1080px; margin:0 auto; padding:32px;")}>
         <h1 style={S("color:var(--text); font-size:24px; margin:0 0 4px;")}>Smoke tests</h1>
@@ -1071,8 +1084,29 @@ class Studio extends React.Component {
             <button onClick={this.runSmokes} disabled={v.smokeRunning} style={S("height:34px; padding:0 18px; background:var(--accent); color:#1a1c21; border:none; border-radius:6px; font-weight:600; font-size:13px; opacity:"+(v.smokeRunning?'.6':'1')+";")}>
               {v.smokeRunning ? 'Running…' : 'Run smokes'}
             </button>
+            <button onClick={this.loadPlan} disabled={v.smokePlanLoading} title="See what each test does, without running it" style={S("height:34px; padding:0 14px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text2); font-size:12.5px; opacity:"+(v.smokePlanLoading?'.6':'1')+";")}>
+              {v.smokePlanLoading ? 'Loading…' : 'View test plan'}
+            </button>
             <span style={S("color:var(--text3); font-size:11.5px;")}>{v.smokeDir}</span>
           </div>
+
+          {v.smokePlan && (
+            v.smokePlan.error
+              ? <div style={S("display:flex; gap:10px; padding:14px 16px; background:rgba(255,92,131,.10); border:1px solid rgba(255,92,131,.3); border-radius:8px; color:var(--text2); font-size:13px; margin-bottom:16px;")}><span>{v.smokePlan.error}</span></div>
+              : <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px 0; margin-bottom:18px;")}>
+                  <div style={S("padding:8px 18px 12px; color:var(--text3); font-size:12px; border-bottom:1px solid var(--border);")}>Test plan — {(v.smokePlan.plans||[]).length} tests in <b style={{color:'var(--text2)'}}>{v.smokeGroup||'all smoke tests'}</b> (from the spec source, not a run)</div>
+                  {(v.smokePlan.plans||[]).map((p,i)=>(
+                    <div key={i} style={S("padding:12px 18px; border-bottom:1px solid var(--border);")}>
+                      <div style={S("color:var(--text); font-size:13px; font-weight:600;")}>{p.describe ? p.describe+' › '+p.title : p.title}</div>
+                      <div style={S("color:var(--text3); font-size:11px; font-family:var(--font-mono); margin:2px 0 6px;")}>{p.file}</div>
+                      <ol style={S("margin:0; padding-left:20px; color:var(--text2); font-size:12.5px; line-height:1.7;")}>
+                        {(p.steps||[]).map((st,j)=><li key={j}>{st}</li>)}
+                        {(p.steps||[]).length===0 && <li style={{color:'var(--text3)',listStyle:'none',marginLeft:'-20px'}}>(no extractable steps)</li>}
+                      </ol>
+                    </div>
+                  ))}
+                </div>
+          )}
 
           {v.smokeRunning && (
             <div style={S("display:flex; align-items:center; gap:12px; padding:16px; background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-bottom:16px;")}>
@@ -1088,15 +1122,26 @@ class Studio extends React.Component {
               ? <div style={S("display:flex; gap:10px; padding:14px 16px; background:var(--well); border:1px solid var(--border); border-radius:8px; color:var(--text2); font-size:13px;")}><Svg w={16} h={16} stroke="var(--warning)" sw={2.2} style={S("flex:none; margin-top:1px;")} d="M12 9v4M12 17h.01|M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><span>No specs ran. Usually the e2e auth setup failed — check that the instance is reachable and the admin token is valid (the server terminal logs the Playwright output).</span></div>
               : (<>
                 <div style={S("display:grid; gap:14px; margin-bottom:18px; grid-template-columns:repeat("+v.statsCols+",1fr);")}>
-                  {[['Passed',run.passed,'#3db67b'],['Failed',run.failed,'#ff5c83'],['Skipped',run.skipped,'#8b8fa2'],['Duration',Math.round(run.durationMs/1000)+'s','#6a67fe']].map(([lbl,val,col])=>(
-                    <div key={lbl} style={S("background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px 18px;")}>
-                      <div style={{fontSize:'26px',fontWeight:600,color:col,fontVariantNumeric:'tabular-nums',lineHeight:1}}>{val}</div>
-                      <div style={S("color:var(--text3); font-size:12.5px; margin-top:6px;")}>{lbl}</div>
-                    </div>
-                  ))}
+                  {[['Passed',run.passed,'#3db67b','passed'],['Failed',run.failed,'#ff5c83','failed'],['Skipped',run.skipped,'#8b8fa2','skipped'],['Duration',Math.round(run.durationMs/1000)+'s','#6a67fe',null]].map(([lbl,val,col,st])=>{
+                    const active = st && v.smokeStatus===st;
+                    return (
+                      <div key={lbl} onClick={st?(()=>this.setState({smokeStatus:active?'':st})):undefined}
+                        title={st?'Click to show only '+st:undefined}
+                        style={S("background:var(--surface); border:1px solid "+(active?col:'var(--border)')+"; border-radius:8px; padding:16px 18px;"+(st?' cursor:pointer;':''))}>
+                        <div style={{fontSize:'26px',fontWeight:600,color:col,fontVariantNumeric:'tabular-nums',lineHeight:1}}>{val}</div>
+                        <div style={S("color:var(--text3); font-size:12.5px; margin-top:6px;")}>{lbl}</div>
+                      </div>
+                    );
+                  })}
                 </div>
+                {v.smokeStatus && (
+                  <div style={S("display:flex; align-items:center; gap:8px; margin-bottom:10px; color:var(--text3); font-size:12px;")}>
+                    <span>Showing <b style={{color:dot(v.smokeStatus)}}>{v.smokeStatus}</b> only ({shown.length})</span>
+                    <button onClick={()=>this.setState({smokeStatus:''})} style={S("height:24px; padding:0 10px; background:transparent; border:1px solid var(--border); border-radius:5px; color:var(--text2); font-size:11px; cursor:pointer;")}>Clear filter</button>
+                  </div>
+                )}
                 <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow-x:auto;")}>
-                  {run.results.map((res,i)=>(
+                  {shown.map((res,i)=>(
                     <div key={i} style={S("display:grid; grid-template-columns:20px minmax(0,1fr) 70px; gap:12px; align-items:center; padding:11px 18px; border-bottom:1px solid var(--border);")}>
                       <span style={{width:'10px',height:'10px',borderRadius:'50%',background:dot(res.status),flex:'none'}}/>
                       <span style={S("min-width:0;")}>
