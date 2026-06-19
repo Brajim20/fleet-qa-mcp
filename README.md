@@ -10,20 +10,45 @@ prefilled GitHub issues — the manual QA workflow, packaged so anyone can reuse
 ## Quick start
 
 ```bash
-git clone <this-repo> && cd fleet-qa-mcp
+git clone https://github.com/Brajim20/fleet-qa-mcp && cd fleet-qa-mcp
 fleetctl login                 # so ~/.fleet/config has your instance URL + token
+gh auth login                  # GitHub access (for the QA queue / reading issues)
 make qa-setup                  # deps + Playwright Chromium (one-time)
 make qa-mcp                    # build ./build/fleet-qa-mcp
-export FLEET_REPO=~/path/to/fleet   # your Fleet checkout (for code tools)
+export FLEET_REPO=~/path/to/fleet   # your Fleet checkout (code tools + smoke suite)
 make qa-auth                   # reusable browser session from your admin token
 ```
 
 Then any of:
 - **MCP**: open the repo in Claude Code (auto-detects `.mcp.json`) / Cursor / VS Code, enable `fleet-qa`. Run the `whoami` tool first.
 - **CLI**: `./build/fleet-qa-mcp help`
-- **Web app (Fleet QA Studio)**: `make studio` → <http://127.0.0.1:8799>. Paste a GitHub issue and it runs the whole investigation against your live build. See [studio/README.md](studio/README.md).
+- **Web app (Fleet QA Studio)**: `make studio` → <http://127.0.0.1:8799>. See below.
 
-See **[ONBOARDING.md](ONBOARDING.md)** for full setup, per-user config, the human-in-the-loop steps, and limits.
+It's built so **anyone runs it locally with their own creds** — no shared server. See **[ONBOARDING.md](ONBOARDING.md)** for full setup, per-user config, the human-in-the-loop steps, and limits.
+
+## Fleet QA Studio (web app)
+
+`make studio` → <http://127.0.0.1:8799> — the web front-end over the same core:
+
+- **New investigation** — paste a GitHub issue; it reproduces against the live build, root-causes in the deployed source, classifies released vs unreleased, and proposes a verdict you confirm.
+- **QA queue** — open Fleet `bug`/`story` issues filtered by **type · product group · milestone · status** (real GitHub Project board statuses); investigate any of them.
+- **Reproduce / Run test plan** — execute a ticket's own *Steps to reproduce* (bugs) or *Test plan* (stories) against the live build.
+- **Smoke tests** — run your Playwright smoke suite per product group and see the pass/fail matrix.
+- On a verdict: **prefilled bug draft** (Fleet template, never auto-posted) or a **generated Playwright regression test**.
+
+### Per-feature setup (each user, runs locally)
+
+| Feature | Needs |
+|---|---|
+| Investigations / target instance | `fleetctl login` (`~/.fleet/config`) or `FLEET_URL` + `FLEET_TOKEN` |
+| Code tools + released/unreleased | `FLEET_REPO` → your Fleet checkout |
+| Browser repro / smoke runs | `make qa-setup` (Playwright Chromium) + `make qa-auth` |
+| **QA queue** | GitHub auth — `gh auth login` (or `GITHUB_TOKEN`) |
+| **QA queue → board statuses** | `gh auth refresh -s read:project` (else falls back to the label-derived status) |
+| **Smoke tests** | the Playwright suite present at `$FLEET_REPO/tools/qa/playwright` (override with `SMOKE_DIR`) |
+| **AI agent** (optional) | `ANTHROPIC_API_KEY` in `.env` (else the deterministic heuristic engine) |
+
+> The QA queue and Smoke tests tabs appear only in **live mode** (i.e. when `make studio` is serving the backend). The static GitHub Pages build is a **demo** (mock data) — the functional tool runs locally.
 
 ## Tools / commands
 
