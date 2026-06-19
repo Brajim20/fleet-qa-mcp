@@ -1305,7 +1305,7 @@ class Studio extends React.Component {
                     {open && (
                       <div className="qa-fade" style={S("border:1px solid var(--border); border-top:none; border-radius:0 0 8px 8px; margin-top:-1px; padding:16px; background:var(--surface);")}>
                         {step.detail
-                          ? <pre style={S("margin:0; background:var(--code-bg); color:var(--code-fg); padding:14px; border-radius:6px; font-size:12px; line-height:1.6; overflow:auto; white-space:pre-wrap; max-height:340px;")}>{step.detail}</pre>
+                          ? <pre style={S("margin:0; background:var(--code-bg); color:var(--code-fg); padding:14px; border-radius:6px; font-size:12px; line-height:1.6; overflow:auto; white-space:pre-wrap; max-height:"+(step.kind==='issue'?'none':'70vh')+";")}>{step.detail}</pre>
                           : <div style={S("color:var(--text3); font-size:12.5px;")}>{step.summary}</div>}
                         {step.image && <img src={step.image} alt="repro screenshot" style={{display:'block',width:'100%',marginTop:'12px',borderRadius:'6px',border:'1px solid var(--border)'}}/>}
                       </div>
