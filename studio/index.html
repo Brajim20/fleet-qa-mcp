@@ -107,7 +107,7 @@ class Studio extends React.Component {
     live: false, liveList: [], liveReports: {}, busy: false, busyMsg: '',
     liveVerdict: {}, liveConfirmed: {},
     // QA queue (real open bugs) + generated-spec modal.
-    queue: [], queueLoading: false, queueLabel: 'bug', queueGroup: '#g-software', queueStatus: '', queueMilestone: '', milestones: [], spec: null,
+    queue: [], queueLoading: false, queueType: 'bug', queueGroup: '#g-software', queueStatus: '', queueMilestone: '', milestones: [], spec: null,
   };
   // Fleet engineering product groups (the #g-* labels) for the queue filter,
   // matching the org's project boards (github.com/orgs/fleetdm/projects).
@@ -195,7 +195,7 @@ class Studio extends React.Component {
   goQueue = () => { this.setState({ view:'queue', targetOpen:false, modal:null }); this.loadQueue(); if (!this.state.milestones.length) this.loadMilestones(); };
   loadQueue(){
     this.setState({ queueLoading:true });
-    let url = '/api/queue?label='+encodeURIComponent(this.state.queueLabel);
+    let url = '/api/queue?type='+encodeURIComponent(this.state.queueType);
     if (this.state.queueGroup) url += '&group='+encodeURIComponent(this.state.queueGroup);
     if (this.state.queueMilestone) url += '&milestone='+encodeURIComponent(this.state.queueMilestone);
     fetch(url)
@@ -206,6 +206,7 @@ class Studio extends React.Component {
   loadMilestones(){
     fetch('/api/milestones').then(r=>r.json()).then(d => this.setState({ milestones:d.milestones||[] })).catch(()=>{});
   }
+  setQueueType = (e) => this.setState({ queueType:e.target.value }, () => this.loadQueue());            // server-side
   setQueueGroup = (e) => this.setState({ queueGroup:e.target.value }, () => this.loadQueue());         // server-side
   setQueueMilestone = (e) => this.setState({ queueMilestone:e.target.value }, () => this.loadQueue()); // server-side
   setQueueStatus = (e) => this.setState({ queueStatus:e.target.value });                                // client-side
@@ -555,7 +556,7 @@ class Studio extends React.Component {
       isDashboard:s.view==='dashboard', isNew:s.view==='new', isDetail:s.view==='detail', isQueue:s.view==='queue',
       crumb: s.view==='dashboard'?'Investigations':s.view==='new'?'New investigation':s.view==='queue'?'QA queue':(crumbNum?'#'+crumbNum:'Investigation'),
       navDashStyle:navBtn(s.view==='dashboard'), navNewStyle:navBtn(s.view==='new'), navQueueStyle:navBtn(s.view==='queue'),
-      queue:s.queue, queueLoading:s.queueLoading, queueLabel:s.queueLabel, queueGroup:s.queueGroup, queueStatus:s.queueStatus, queueMilestone:s.queueMilestone, milestones:s.milestones, spec:s.spec,
+      queue:s.queue, queueLoading:s.queueLoading, queueType:s.queueType, queueGroup:s.queueGroup, queueStatus:s.queueStatus, queueMilestone:s.queueMilestone, milestones:s.milestones, spec:s.spec,
       navRecent, investigations, stats, examples, targetOpen:s.targetOpen, live:s.live, agent:s.agent, liveActive,
       urlInput:s.urlInput, inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
       runLabel: s.running?'Running…':'Run remaining checks',
@@ -941,9 +942,15 @@ class Studio extends React.Component {
           <h1 style={S("color:var(--text); font-size:24px; margin:0;")}>QA queue</h1>
           <button onClick={()=>this.loadQueue()} style={S("height:34px; padding:0 14px; background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text2); font-size:12.5px;")}>Refresh</button>
         </div>
-        <p style={S("color:var(--text3); font-size:14px; margin:0 0 16px;")}>Open <b style={{color:'var(--text2)'}}>bug</b> issues in fleetdm/fleet — pick one to investigate against the live build.</p>
+        <p style={S("color:var(--text3); font-size:14px; margin:0 0 16px;")}>Open <b style={{color:'var(--text2)'}}>{v.queueType==='all'?'':v.queueType+' '}</b>issues in fleetdm/fleet — pick one to investigate against the live build.</p>
         <div style={S("display:flex; gap:10px; align-items:center; margin-bottom:18px; flex-wrap:wrap;")}>
-          <span style={S("color:var(--text3); font-size:12px;")}>Product group</span>
+          <span style={S("color:var(--text3); font-size:12px;")}>Type</span>
+          <select value={v.queueType} onChange={this.setQueueType} style={selStyle}>
+            <option value="bug">Bugs</option>
+            <option value="story">Stories</option>
+            <option value="all">All issues</option>
+          </select>
+          <span style={S("color:var(--text3); font-size:12px; margin-left:8px;")}>Product group</span>
           <select value={v.queueGroup} onChange={this.setQueueGroup} style={selStyle}>
             <option value="">All groups</option>
             {this.GROUPS.map(g => <option key={g} value={g}>{g}</option>)}

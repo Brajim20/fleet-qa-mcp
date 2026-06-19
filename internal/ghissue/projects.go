@@ -30,7 +30,7 @@ func authToken() string {
 // when the token is missing or lacks the scope, so the caller falls back to the
 // label-derived status. Best-effort — a board an issue isn't on simply yields
 // no status for it.
-func ProjectStatuses(numbers []int) map[int]string {
+func ProjectStatuses(numbers []int, preferGroup string) map[int]string {
 	out := map[int]string{}
 	token := authToken()
 	if token == "" || len(numbers) == 0 {
@@ -42,16 +42,16 @@ func ProjectStatuses(numbers []int) map[int]string {
 		if end > len(numbers) {
 			end = len(numbers)
 		}
-		mergeProjectStatuses(out, token, numbers[start:end])
+		mergeProjectStatuses(out, token, numbers[start:end], preferGroup)
 	}
 	return out
 }
 
-func mergeProjectStatuses(into map[int]string, token string, numbers []int) {
+func mergeProjectStatuses(into map[int]string, token string, numbers []int, preferGroup string) {
 	var q strings.Builder
 	q.WriteString(`query { repository(owner:"fleetdm", name:"fleet") {`)
 	for _, n := range numbers {
-		fmt.Fprintf(&q, ` i%d: issue(number:%d){ projectItems(first:8){ nodes { s: fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue { name } } } } }`, n, n)
+		fmt.Fprintf(&q, ` i%d: issue(number:%d){ projectItems(first:8){ nodes { project{title} s: fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue { name } } } } }`, n, n)
 	}
 	q.WriteString(` } }`)
 
@@ -74,6 +74,9 @@ func mergeProjectStatuses(into map[int]string, token string, numbers []int) {
 			Repository map[string]struct {
 				ProjectItems struct {
 					Nodes []struct {
+						Project struct {
+							Title string `json:"title"`
+						} `json:"project"`
 						S *struct {
 							Name string `json:"name"`
 						} `json:"s"`
@@ -90,11 +93,24 @@ func mergeProjectStatuses(into map[int]string, token string, numbers []int) {
 		if _, err := fmt.Sscanf(alias, "i%d", &n); err != nil || n == 0 {
 			continue
 		}
+		// Prefer the selected group's board (an issue can sit on several);
+		// otherwise take the first board that has a Status.
+		first := ""
 		for _, node := range item.ProjectItems.Nodes {
-			if node.S != nil && node.S.Name != "" {
-				into[n] = normalizeBoardStatus(node.S.Name) // first board with a Status wins
+			if node.S == nil || node.S.Name == "" {
+				continue
+			}
+			st := normalizeBoardStatus(node.S.Name)
+			if first == "" {
+				first = st
+			}
+			if preferGroup != "" && strings.Contains(node.Project.Title, preferGroup) {
+				first = st
 				break
 			}
+		}
+		if first != "" {
+			into[n] = first
 		}
 	}
 }

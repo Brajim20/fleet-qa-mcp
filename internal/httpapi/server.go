@@ -91,15 +91,26 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // handleQueue lists the QA backlog — open fleetdm/fleet issues labeled with the
 // given label (default "bug"), most-recently-updated first.
 func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
-	label := r.URL.Query().Get("label")
-	if label == "" {
-		label = "bug"
+	// Issue type → base label. "all" applies no type label so stories/tasks
+	// (which QA also verifies, e.g. an Awaiting-QA story) show up too.
+	var parts []string
+	switch t := r.URL.Query().Get("type"); t {
+	case "", "bug":
+		parts = append(parts, "bug")
+	case "story":
+		parts = append(parts, "story")
+	case "all":
+		// no type label
+	default:
+		parts = append(parts, t)
 	}
 	// Optional product-group filter (#g-*). GitHub treats comma-separated labels
 	// as AND, so "bug,#g-software" = open software bugs.
-	if g := r.URL.Query().Get("group"); g != "" {
-		label = label + "," + g
+	group := r.URL.Query().Get("group")
+	if group != "" {
+		parts = append(parts, group)
 	}
+	label := strings.Join(parts, ",")
 	issues, err := ghissue.List(label, r.URL.Query().Get("milestone"), 50)
 	if err != nil {
 		writeErr(w, 502, err.Error())
@@ -111,7 +122,7 @@ func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
 	for i, is := range issues {
 		nums[i] = is.Number
 	}
-	board := ghissue.ProjectStatuses(nums)
+	board := ghissue.ProjectStatuses(nums, group)
 
 	list := make([]map[string]any, 0, len(issues))
 	for _, i := range issues {

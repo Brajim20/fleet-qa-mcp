@@ -148,8 +148,10 @@ func List(label, milestone string, limit int) ([]*Issue, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 30
 	}
-	url := fmt.Sprintf("https://api.github.com/repos/fleetdm/fleet/issues?state=open&labels=%s&sort=updated&direction=desc&per_page=%d",
-		neturl.QueryEscape(label), limit)
+	url := fmt.Sprintf("https://api.github.com/repos/fleetdm/fleet/issues?state=open&sort=updated&direction=desc&per_page=%d", limit)
+	if label != "" { // empty = no label filter (all issue types)
+		url += "&labels=" + neturl.QueryEscape(label)
+	}
 	if milestone != "" {
 		url += "&milestone=" + neturl.QueryEscape(milestone)
 	}
