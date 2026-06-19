@@ -48,8 +48,9 @@ func agentTools() []llm.Tool {
 			InputSchema: obj(map[string]any{"path": str("API path beginning with /api/")}, "path")},
 		{Name: "browser_eval", Description: "Open a page on the live instance in real Chromium (authenticated) and run a JS expression; returns JSON and captures a screenshot. Use for UI repros.",
 			InputSchema: obj(map[string]any{
-				"path": str("page path, e.g. /software or /policies"),
-				"js":   str("optional JS expression to evaluate in the page; defaults to a generic page probe"),
+				"path":          str("page path, e.g. /software or /policies"),
+				"js":            str("optional JS expression to evaluate in the page; defaults to a generic page probe"),
+				"shot_selector": str("optional CSS selector of the buggy element; the screenshot is scrolled to it and outlined, so the image shows the actual bug"),
 			}, "path")},
 		{Name: "grep_code", Description: "git grep a pattern in the Fleet source at the DEPLOYED revision.",
 			InputSchema: obj(map[string]any{
@@ -121,8 +122,9 @@ func (a *App) investigateAgentic(c *llm.Client, ref, mode, shotDir, shotURLBase 
 			return outOrErr(out, err), nil
 		case "browser_eval":
 			var in struct {
-				Path string `json:"path"`
-				JS   string `json:"js"`
+				Path    string `json:"path"`
+				JS      string `json:"js"`
+				ShotSel string `json:"shot_selector"`
 			}
 			_ = json.Unmarshal(input, &in)
 			if in.JS == "" {
@@ -138,7 +140,9 @@ func (a *App) investigateAgentic(c *llm.Client, ref, mode, shotDir, shotURLBase 
 			}
 			rep.Route = ensureSlash(in.Path)
 			pageURL := strings.TrimRight(a.Inst.URL, "/") + ensureSlash(in.Path)
-			out, err := a.BrowserEval(pageURL, in.JS, shotPath)
+			// Highlight the buggy element in context when the agent names one,
+			// so the captured image actually shows the bug.
+			out, err := a.BrowserEval(pageURL, in.JS, shotPath, ShotOpts{Selector: in.ShotSel, Highlight: in.ShotSel != ""})
 			a.recordStep(rep, "reproduce", "browser", "Reproduce in live browser", "browser.eval", "open "+in.Path, out, err, shotURL)
 			return outOrErr(out, err), nil
 		case "grep_code":

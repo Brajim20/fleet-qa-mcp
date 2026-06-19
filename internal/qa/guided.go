@@ -140,7 +140,7 @@ func (a *App) stepBrowserAt(route, shotName, shotDir, shotURLBase string) StepRe
 		}
 	}
 	js := `() => ({ title: document.title, url: location.href })`
-	out, err := a.BrowserEval(pageURL, js, shotPath)
+	out, err := a.BrowserEval(pageURL, js, shotPath, ShotOpts{})
 	if err != nil {
 		return StepResult{Kind: "reproduce", Sub: "browser", Tool: "browser.eval", Status: "warn",
 			Summary: "open " + route, Detail: "Navigated to: " + pageURL + "\n\n" + err.Error()}

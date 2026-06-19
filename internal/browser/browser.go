@@ -155,9 +155,44 @@ func (s *Session) SampleFrames(selectors, props []string, durationMs int, trigge
 	})
 }
 
-// Screenshot writes a PNG and returns its path.
-func (s *Session) Screenshot(path string) (string, error) {
-	_, err := s.page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String(path)})
+// Screenshot writes a PNG and returns its path. The default (empty selector,
+// fullPage=false) captures the current viewport — which misses bugs that are
+// below the fold or are a small element lost in a full-page shot. The options
+// make the image actually show the bug:
+//   - selector set, highlight=false: scroll the element into view and crop the
+//     shot to JUST that element ("the actual bug itself").
+//   - selector set, highlight=true: scroll it into view, draw a red outline
+//     around it, and capture the viewport (the bug in context).
+//   - selector empty: capture the viewport, or the whole scrollable page when
+//     fullPage=true.
+func (s *Session) Screenshot(path, selector string, fullPage, highlight bool) (string, error) {
+	if selector != "" {
+		loc := s.page.Locator(selector).First()
+		// Scroll it in so it's rendered/visible before we capture it.
+		_ = loc.ScrollIntoViewIfNeeded(playwright.LocatorScrollIntoViewIfNeededOptions{
+			Timeout: playwright.Float(4000),
+		})
+		if highlight {
+			// Outline the element, then shoot the viewport so the bug is shown
+			// in context (useful when the surrounding layout matters).
+			_, _ = s.page.Evaluate(`(sel) => {
+				const e = document.querySelector(sel);
+				if (e) { e.style.outline = '3px solid #ff0044'; e.style.outlineOffset = '2px'; e.scrollIntoView({block:'center'}); }
+			}`, selector)
+			s.page.WaitForTimeout(150)
+			_, err := s.page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String(path)})
+			return path, err
+		}
+		// Crop to just the element.
+		if _, err := loc.Screenshot(playwright.LocatorScreenshotOptions{Path: playwright.String(path)}); err != nil {
+			return path, err
+		}
+		return path, nil
+	}
+	_, err := s.page.Screenshot(playwright.PageScreenshotOptions{
+		Path:     playwright.String(path),
+		FullPage: playwright.Bool(fullPage),
+	})
 	return path, err
 }
 
