@@ -270,7 +270,15 @@ class Studio extends React.Component {
       .then(d => this.setState({ smokeAvail:!!d.available, smokeMsg:d.message||'', smokeDir:d.dir||'', smokeGroups:d.groups||[] }))
       .catch(()=>this.setState({ smokeAvail:false, smokeMsg:'Could not reach the smoke runner' }));
   }
-  setSmokeGroup = (e) => this.setState({ smokeGroup:e.target.value, smokePlan:null });
+  setSmokeGroup = (e) => {
+    // Switching suite invalidates the previous run's results (they were for a
+    // different suite) and the status filter. If a test plan is currently
+    // shown, refresh it for the newly-selected suite so the view stays in sync.
+    const reloadPlan = !!this.state.smokePlan && !this.state.smokePlan.error;
+    this.setState({ smokeGroup:e.target.value, smokeRun:null, smokeStatus:'', smokePlan:null }, () => {
+      if (reloadPlan) this.loadPlan();
+    });
+  };
   setSmokeStatus = (e) => this.setState({ smokeStatus:e.target.value });
   loadPlan = () => {
     if (this.state.smokePlanLoading) return;
