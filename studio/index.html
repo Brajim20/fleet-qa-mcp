@@ -694,7 +694,7 @@ class Studio extends React.Component {
         {v.spec && this.state.modal==='spec' && this.renderSpec(v)}
         {this.state.pending>0 && <div className="qa-bar"><span/></div>}
         {this.state.busy && (
-          <div className="qa-fade" style={S("position:fixed; inset:0; background:rgba(15,18,38,.62); display:flex; align-items:center; justify-content:center; z-index:90; padding:32px;")}>
+          <div className="qa-fade" style={S("position:fixed; inset:0; background:rgba(15,18,38,.62); display:flex; align-items:center; justify-content:center; z-index:90; padding:32px; padding-left:262px;")}>
             <div style={S("width:440px; max-width:100%; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px 26px; box-shadow:0 12px 40px rgba(0,0,0,.4);")}>
               <div style={S("display:flex; align-items:center; gap:10px; margin-bottom:6px;")}>
                 <FleetLogo size={20}/>
