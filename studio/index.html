@@ -116,6 +116,7 @@ class Studio extends React.Component {
     // In live mode, investigations actually run against the deployed build.
     live: false, liveList: [], liveReports: {}, busy: false, busyMsg: '', busyPhase: 0,
     liveVerdict: {}, liveConfirmed: {}, pending: 0,
+    vw: (typeof window !== 'undefined' ? window.innerWidth : 1280), // drives responsive layout
     // QA queue (real open bugs) + generated-spec modal.
     queue: [], queueLoading: false, queueType: 'bug', queueGroup: '#g-software', queueStatus: '', queueMilestone: '', milestones: [], spec: null,
     // Smoke suite runner.
@@ -174,6 +175,9 @@ class Studio extends React.Component {
       };
       window.__qaFetchWrapped = true;
     }
+    // Responsive: re-render on viewport resize (layout switches at breakpoints).
+    this._onResize = () => { const w = window.innerWidth; if (Math.abs(w - this.state.vw) > 16) this.setState({ vw: w }); };
+    window.addEventListener('resize', this._onResize);
     // Is the fleet-qa-mcp backend serving us? If so, switch to LIVE mode and
     // drive real investigations. If not (e.g. GitHub Pages), stay in demo mode
     // with the mock data, and best-effort read the instance version directly.
@@ -380,7 +384,7 @@ class Studio extends React.Component {
     this.setState({ running:true }); let tick = 2;
     this._ri = setInterval(()=>{ tick+=1; this.setState({runTick:tick}); if(tick>=7){clearInterval(this._ri); this.setState({running:false});} },650);
   };
-  componentWillUnmount(){ clearInterval(this._ri); clearInterval(this._bp); clearTimeout(this._tt); }
+  componentWillUnmount(){ clearInterval(this._ri); clearInterval(this._bp); clearTimeout(this._tt); if (this._onResize) window.removeEventListener('resize', this._onResize); }
 
   buildSteps(inv){
     if (inv.kindSet==='rich-fixed') return this.stepsFixed();
@@ -564,7 +568,13 @@ class Studio extends React.Component {
   renderVals(){
     const s = this.state;
     const isDark = s.theme === 'dark';
-    const navBtn = (active) => ({ display:'flex',alignItems:'center',gap:'10px',width:'100%',textAlign:'left',height:'38px',padding:'0 12px',borderRadius:'6px',border:'none',fontSize:'13.5px',fontWeight:600, background:active?'var(--accent-tint)':'transparent', color:active?'var(--accent)':'var(--text2)' });
+    // Responsive breakpoints.
+    const vw = s.vw || 1280;
+    const compact = vw < 760;        // icon-only sidebar
+    const stackDetail = vw < 1040;   // verdict panel drops below the timeline
+    const statsCols = vw < 520 ? 1 : vw < 840 ? 2 : 4;
+    const sidebarW = compact ? 56 : 230;
+    const navBtn = (active) => ({ display:'flex',alignItems:'center',justifyContent:compact?'center':'flex-start',gap:compact?'0':'10px',width:'100%',textAlign:'left',height:'38px',padding:compact?'0':'0 12px',borderRadius:'6px',border:'none',fontSize:'13.5px',fontWeight:600, background:active?'var(--accent-tint)':'transparent', color:active?'var(--accent)':'var(--text2)' });
     const chipFor = (st) => this.CHIP[st] || this.CHIP['In progress'];
     const baseInvs = s.live ? this.liveSource() : this.investigations;
     const evCount = (i) => s.live ? (i.evidenceCount||0) : 7;
@@ -622,6 +632,7 @@ class Studio extends React.Component {
       navDashStyle:navBtn(s.view==='dashboard'), navNewStyle:navBtn(s.view==='new'), navQueueStyle:navBtn(s.view==='queue'), navSmokesStyle:navBtn(s.view==='smokes'),
       queue:s.queue, queueLoading:s.queueLoading, queueType:s.queueType, queueGroup:s.queueGroup, queueStatus:s.queueStatus, queueMilestone:s.queueMilestone, milestones:s.milestones, spec:s.spec,
       smokeAvail:s.smokeAvail, smokeMsg:s.smokeMsg, smokeDir:s.smokeDir, smokeGroups:s.smokeGroups, smokeGroup:s.smokeGroup, smokeRun:s.smokeRun, smokeRunning:s.smokeRunning,
+      compact, stackDetail, statsCols, sidebarW,
       navRecent, investigations, stats, examples, targetOpen:s.targetOpen, live:s.live, agent:s.agent, liveActive,
       urlInput:s.urlInput, inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
       runLabel: s.running?'Running…':'Run remaining checks',
@@ -636,35 +647,37 @@ class Studio extends React.Component {
     return (
       <div className={"qa "+v.themeClass} style={S("display:flex; height:100vh; width:100%; overflow:hidden; background:var(--bg); color:var(--text2); font-family:var(--font-sans); font-size:14px;")}>
         {/* SIDEBAR */}
-        <aside style={S("width:230px; flex:none; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column;")}>
-          <div style={S("height:60px; flex:none; display:flex; align-items:center; gap:10px; padding:0 18px; border-bottom:1px solid var(--border);")}>
+        <aside style={{...S("flex:none; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column;"), width:v.sidebarW+'px'}}>
+          <div style={{...S("height:60px; flex:none; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--border);"), padding:v.compact?'0':'0 18px', justifyContent:v.compact?'center':'flex-start'}}>
             <FleetLogo size={26}/>
-            <div style={S("display:flex; flex-direction:column; line-height:1.15;")}>
-              <span style={S("color:var(--text); font-weight:600; font-size:14px;")}>QA Studio</span>
-              <span style={S("color:var(--text3); font-size:10.5px; letter-spacing:.04em; text-transform:uppercase;")}>Fleet</span>
-            </div>
+            {!v.compact && (
+              <div style={S("display:flex; flex-direction:column; line-height:1.15;")}>
+                <span style={S("color:var(--text); font-weight:600; font-size:14px;")}>QA Studio</span>
+                <span style={S("color:var(--text3); font-size:10.5px; letter-spacing:.04em; text-transform:uppercase;")}>Fleet</span>
+              </div>
+            )}
           </div>
-          <nav style={S("padding:14px 12px; display:flex; flex-direction:column; gap:2px;")}>
-            <button onClick={this.goDashboard} style={v.navDashStyle}>
-              <Svg d="" ><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></Svg> Dashboard
+          <nav style={{...S("display:flex; flex-direction:column; gap:2px;"), padding:v.compact?'14px 8px':'14px 12px'}}>
+            <button onClick={this.goDashboard} style={v.navDashStyle} title="Dashboard">
+              <Svg d="" ><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></Svg>{!v.compact && ' Dashboard'}
             </button>
-            <button onClick={this.goNew} style={v.navNewStyle}>
-              <Svg><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></Svg> New investigation
+            <button onClick={this.goNew} style={v.navNewStyle} title="New investigation">
+              <Svg><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></Svg>{!v.compact && ' New investigation'}
             </button>
             {v.live && (
-              <button onClick={this.goQueue} style={v.navQueueStyle}>
-                <Svg><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></Svg> QA queue
+              <button onClick={this.goQueue} style={v.navQueueStyle} title="QA queue">
+                <Svg><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></Svg>{!v.compact && ' QA queue'}
               </button>
             )}
             {v.live && (
-              <button onClick={this.goSmokes} style={v.navSmokesStyle}>
-                <Svg><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></Svg> Smoke tests
+              <button onClick={this.goSmokes} style={v.navSmokesStyle} title="Smoke tests">
+                <Svg><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></Svg>{!v.compact && ' Smoke tests'}
               </button>
             )}
           </nav>
-          <div style={S("padding:6px 18px 8px; color:var(--text3); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase;")}>Recent</div>
+          {!v.compact && <div style={S("padding:6px 18px 8px; color:var(--text3); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase;")}>Recent</div>}
           <div style={S("flex:1; overflow:auto; padding:0 10px 10px; display:flex; flex-direction:column; gap:1px;")}>
-            {v.navRecent.map(r => (
+            {!v.compact && v.navRecent.map(r => (
               <button key={r.number} onClick={r.onOpen} style={r.navStyle}>
                 <span style={{width:'7px',height:'7px',borderRadius:'50%',flex:'none',background:r.dot}}/>
                 <span style={S("overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-variant-numeric:tabular-nums;")}>#{r.number}</span>
@@ -672,13 +685,15 @@ class Studio extends React.Component {
               </button>
             ))}
           </div>
-          <div style={S("padding:12px; border-top:1px solid var(--border); display:flex; align-items:center; gap:10px;")}>
-            <div style={S("width:30px; height:30px; border-radius:50%; background:var(--accent-tint); color:var(--accent); display:flex; align-items:center; justify-content:center; font-weight:600; font-size:12px; flex:none;")}>{this.userInitials}</div>
+          <div style={{...S("padding:12px; border-top:1px solid var(--border); display:flex; align-items:center; gap:10px;"), justifyContent:v.compact?'center':'flex-start'}}>
+            {!v.compact && <div style={S("width:30px; height:30px; border-radius:50%; background:var(--accent-tint); color:var(--accent); display:flex; align-items:center; justify-content:center; font-weight:600; font-size:12px; flex:none;")}>{this.userInitials}</div>}
+            {!v.compact && (
             <div style={S("line-height:1.2; min-width:0;")}>
               <div style={S("color:var(--text); font-weight:600; font-size:12.5px;")}>{this.USER.name}</div>
               <div style={S("color:var(--text3); font-size:11px;")}>{this.USER.role}</div>
             </div>
-            <button onClick={this.toggleTheme} title="Toggle theme" style={S("margin-left:auto; width:30px; height:30px; flex:none; border:1px solid var(--border); background:transparent; color:var(--text2); border-radius:6px; display:flex; align-items:center; justify-content:center;")}>
+            )}
+            <button onClick={this.toggleTheme} title="Toggle theme" style={{...S("width:30px; height:30px; flex:none; border:1px solid var(--border); background:transparent; color:var(--text2); border-radius:6px; display:flex; align-items:center; justify-content:center;"), marginLeft:v.compact?'0':'auto'}}>
               {v.isDark
                 ? <Svg w={15} h={15}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></Svg>
                 : <Svg w={15} h={15} d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>}
@@ -736,7 +751,7 @@ class Studio extends React.Component {
         {v.spec && this.state.modal==='spec' && this.renderSpec(v)}
         {this.state.pending>0 && <div className="qa-bar"><span/></div>}
         {this.state.busy && (
-          <div className="qa-fade" style={S("position:fixed; inset:0; background:rgba(15,18,38,.62); display:flex; align-items:center; justify-content:center; z-index:90; padding:32px; padding-left:262px;")}>
+          <div className="qa-fade" style={S("position:fixed; inset:0; background:rgba(15,18,38,.62); display:flex; align-items:center; justify-content:center; z-index:90; padding:32px; padding-left:"+(v.sidebarW+32)+"px;")}>
             <div style={S("width:440px; max-width:100%; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px 26px; box-shadow:0 12px 40px rgba(0,0,0,.4);")}>
               <div style={S("display:flex; align-items:center; gap:10px; margin-bottom:6px;")}>
                 <FleetLogo size={20}/>
@@ -783,7 +798,7 @@ class Studio extends React.Component {
             <Svg sw={2.2} d="M12 5v14M5 12h14"/> New investigation
           </button>
         </div>
-        <div style={S("display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px;")}>
+        <div style={S("display:grid; gap:14px; margin-bottom:24px; grid-template-columns:repeat("+v.statsCols+",1fr);")}>
           {v.stats.map((st,i)=>(
             <div key={i} style={S("background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px 18px;")}>
               <div style={{fontSize:'26px',fontWeight:600,color:st.color,fontVariantNumeric:'tabular-nums',lineHeight:1}}>{st.value}</div>
@@ -791,8 +806,8 @@ class Studio extends React.Component {
             </div>
           ))}
         </div>
-        <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;")}>
-          <div style={S("display:grid; grid-template-columns:62px minmax(0,1fr) 150px 86px 74px; gap:16px; padding:12px 20px; border-bottom:1px solid var(--border); color:var(--text3); font-size:11px; letter-spacing:.05em; text-transform:uppercase;")}>
+        <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow-x:auto;")}>
+          <div style={S("display:grid; grid-template-columns:62px minmax(0,1fr) 150px 86px 74px; gap:16px; min-width:560px; padding:12px 20px; border-bottom:1px solid var(--border); color:var(--text3); font-size:11px; letter-spacing:.05em; text-transform:uppercase;")}>
             <span>Issue</span><span>Title</span><span>Status</span><span>Evidence</span><span style={{textAlign:'right'}}>Updated</span>
           </div>
           {v.live && v.investigations.length===0 && (
@@ -802,7 +817,7 @@ class Studio extends React.Component {
           )}
           {v.investigations.map(item=>(
             <button key={item.number} onClick={item.onOpen} onMouseEnter={item.hoverIn} onMouseLeave={item.hoverOut}
-              style={S("display:grid; grid-template-columns:62px minmax(0,1fr) 150px 86px 74px; gap:16px; align-items:center; width:100%; text-align:left; padding:14px 20px; background:transparent; border:none; border-bottom:1px solid var(--border); color:var(--text2);")}>
+              style={S("display:grid; grid-template-columns:62px minmax(0,1fr) 150px 86px 74px; gap:16px; min-width:560px; align-items:center; width:100%; text-align:left; padding:14px 20px; background:transparent; border:none; border-bottom:1px solid var(--border); color:var(--text2);")}>
               <span style={S("font-family:var(--font-mono); font-size:12.5px; color:var(--accent);")}>#{item.number}</span>
               <span style={S("min-width:0;")}>
                 <span style={S("display:block; color:var(--text); font-weight:600; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{item.title}</span>
@@ -944,7 +959,7 @@ class Studio extends React.Component {
           <a href="#" style={S("font-family:var(--font-mono); color:var(--accent); font-size:12.5px;")}>fleetdm/fleet#{inv.number}</a>
           <span>·</span><span>{inv.area}</span><span>·</span><span>reported by {inv.reporter}</span><span>·</span><span>Fleet {inv.reportedVersion}</span>
         </div>
-        <div style={S("display:grid; grid-template-columns:1fr 320px; gap:28px; align-items:start;")}>
+        <div style={S("display:grid; gap:28px; align-items:start; grid-template-columns:"+(v.stackDetail?'minmax(0,1fr)':'minmax(0,1fr) 320px')+";")}>
           {/* TIMELINE */}
           <div>
             <div style={S("display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;")}>
@@ -1065,7 +1080,7 @@ class Studio extends React.Component {
               : (run.results||[]).length===0
               ? <div style={S("display:flex; gap:10px; padding:14px 16px; background:var(--well); border:1px solid var(--border); border-radius:8px; color:var(--text2); font-size:13px;")}><Svg w={16} h={16} stroke="var(--warning)" sw={2.2} style={S("flex:none; margin-top:1px;")} d="M12 9v4M12 17h.01|M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><span>No specs ran. Usually the e2e auth setup failed — check that the instance is reachable and the admin token is valid (the server terminal logs the Playwright output).</span></div>
               : (<>
-                <div style={S("display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:18px;")}>
+                <div style={S("display:grid; gap:14px; margin-bottom:18px; grid-template-columns:repeat("+v.statsCols+",1fr);")}>
                   {[['Passed',run.passed,'#3db67b'],['Failed',run.failed,'#ff5c83'],['Skipped',run.skipped,'#8b8fa2'],['Duration',Math.round(run.durationMs/1000)+'s','#6a67fe']].map(([lbl,val,col])=>(
                     <div key={lbl} style={S("background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px 18px;")}>
                       <div style={{fontSize:'26px',fontWeight:600,color:col,fontVariantNumeric:'tabular-nums',lineHeight:1}}>{val}</div>
@@ -1073,7 +1088,7 @@ class Studio extends React.Component {
                     </div>
                   ))}
                 </div>
-                <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;")}>
+                <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow-x:auto;")}>
                   {run.results.map((res,i)=>(
                     <div key={i} style={S("display:grid; grid-template-columns:20px minmax(0,1fr) 70px; gap:12px; align-items:center; padding:11px 18px; border-bottom:1px solid var(--border);")}>
                       <span style={{width:'10px',height:'10px',borderRadius:'50%',background:dot(res.status),flex:'none'}}/>
@@ -1128,9 +1143,9 @@ class Studio extends React.Component {
           </select>
           <span style={S("margin-left:auto; color:var(--text3); font-size:12px;")}>{rows.length} issue{rows.length===1?'':'s'}</span>
         </div>
-        <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;")}>
+        <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow-x:auto;")}>
           {v.queueLoading && Array.from({length:7}).map((_,i)=>(
-            <div key={'sk'+i} style={S("display:grid; grid-template-columns:64px minmax(0,1fr) 120px 150px; gap:16px; align-items:center; padding:15px 20px; border-bottom:1px solid var(--border);")}>
+            <div key={'sk'+i} style={S("display:grid; grid-template-columns:64px minmax(0,1fr) 120px 150px; gap:16px; min-width:520px; align-items:center; padding:15px 20px; border-bottom:1px solid var(--border);")}>
               <div className="qa-shimmer" style={{height:'12px',width:'42px'}}/>
               <div><div className="qa-shimmer" style={{height:'12px',width:(62-i*4)+'%'}}/><div className="qa-shimmer" style={{height:'9px',width:'34%',marginTop:'7px'}}/></div>
               <div className="qa-shimmer" style={{height:'20px',width:'92px',borderRadius:'20px'}}/>
@@ -1141,7 +1156,7 @@ class Studio extends React.Component {
             const lbls=item.labels||[];
             const act = lbls.indexOf('bug')>=0 ? {label:'Reproduce',mode:'reproduce'} : lbls.indexOf('story')>=0 ? {label:'Test plan',mode:'testplan'} : {label:'Investigate',mode:''};
             return (
-            <div key={item.number} style={S("display:grid; grid-template-columns:64px minmax(0,1fr) 120px 150px; gap:16px; align-items:center; padding:13px 20px; border-bottom:1px solid var(--border);")}>
+            <div key={item.number} style={S("display:grid; grid-template-columns:64px minmax(0,1fr) 120px 150px; gap:16px; min-width:520px; align-items:center; padding:13px 20px; border-bottom:1px solid var(--border);")}>
               <a href={"https://github.com/fleetdm/fleet/issues/"+item.number} target="_blank" rel="noopener" style={S("font-family:var(--font-mono); font-size:12.5px; color:var(--accent);")}>#{item.number}</a>
               <span style={S("min-width:0;")}>
                 <span style={S("display:block; color:var(--text); font-weight:600; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{item.title}</span>
@@ -1206,7 +1221,7 @@ class Studio extends React.Component {
           <span style={S("display:inline-flex; align-items:center; gap:5px; color:var(--success); font-weight:600;")}><span style={{width:'6px',height:'6px',borderRadius:'50%',background:'var(--success)'}}/>live · {rep.instance} · rev {(rep.rev||'').slice(0,8)}</span>
           {rep.releaseStatus && <span style={{display:'inline-flex',alignItems:'center',gap:'5px',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:700,background:rep.releaseStatus==='Released'?'rgba(255,92,131,.15)':'rgba(61,182,123,.15)',color:rep.releaseStatus==='Released'?'#ff5c83':'#3db67b'}}>{rep.releaseStatus==='Released'?('RELEASED'+(rep.firstRelease?' · '+rep.firstRelease:'')):'UNRELEASED'}</span>}
         </div>
-        <div style={S("display:grid; grid-template-columns:1fr 320px; gap:28px; align-items:start;")}>
+        <div style={S("display:grid; gap:28px; align-items:start; grid-template-columns:"+(v.stackDetail?'minmax(0,1fr)':'minmax(0,1fr) 320px')+";")}>
           {/* TIMELINE */}
           <div>
             <div style={S("display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:14px; flex-wrap:wrap;")}>
