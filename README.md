@@ -64,6 +64,18 @@ It's built so **anyone runs it locally with their own creds** — no shared serv
 | `browser_sample_frames` | `sample-frames` | per-frame sampler for timing/visual bugs |
 | `build_issue_url` | `issue` | **prefilled** GitHub issue URL (never submits) |
 
+### Workflow commands (CLI — same orchestrations as the Studio web app)
+
+| CLI | Purpose |
+|---|---|
+| `investigate <issue> [--mode reproduce\|testplan]` | run a full investigation; print evidence, released/unreleased, proposed verdict, draft URL |
+| `queue [--type bug\|story\|all] [--group #g-*] [--milestone V] [--status S]` | list the QA backlog with board statuses |
+| `smoke [group]` | run the Playwright smoke suite; print the pass/fail matrix |
+| `milestones` | list open release milestones |
+| `spec <issue>` | generate a Playwright regression test |
+
+e.g. `fleet-qa-mcp queue --group '#g-software' --milestone 4.87.0 --status 'Ready for release'`
+
 ## Investigations: AI agent or heuristic engine
 
 `make studio` runs full investigations end-to-end. Two engines, picked automatically:

@@ -318,6 +318,8 @@ var subcommands = map[string]bool{
 	"whoami": true, "code-at-rev": true, "grep": true, "is-in-build": true,
 	"log-search": true, "request": true, "browser-eval": true, "sample-frames": true,
 	"issue": true, "help": true,
+	// workflow commands (parity with the Studio web app)
+	"investigate": true, "queue": true, "smoke": true, "milestones": true, "spec": true,
 }
 
 func isSubcommand(s string) bool { return subcommands[s] }
@@ -352,6 +354,12 @@ func runCLI(name string, args []string) {
 	toFix := fs.String("to-fix", "", "to fix")
 	moreInfo := fs.String("more-info", "", "more info")
 	labels := fs.String("labels", "", "comma-separated extra labels")
+	// workflow flags
+	mode := fs.String("mode", "", "investigate: reproduce | testplan")
+	qtype := fs.String("type", "bug", "queue: bug | story | all")
+	qgroup := fs.String("group", "", "queue: product group label, e.g. #g-software")
+	qmilestone := fs.String("milestone", "", "queue: milestone title or number")
+	qstatus := fs.String("status", "", "queue: filter by status")
 	_ = fs.Parse(args)
 	pos := fs.Args()
 
@@ -383,6 +391,20 @@ func runCLI(name string, args []string) {
 		out, err = a.SampleFrames(arg(pos, 0, "url"), splitCSV(*selectors), splitCSV(*props), *duration, *trigger)
 	case "issue":
 		out, err = a.BuildIssueURL(*title, *actual, *steps, *discovered, *toFix, *moreInfo, splitCSV(*labels))
+	case "investigate":
+		out, err = cmdInvestigate(a, arg(pos, 0, "issue"), *mode)
+	case "queue":
+		out, err = cmdQueue(a, *qtype, *qgroup, *qmilestone, *qstatus)
+	case "smoke":
+		g := ""
+		if len(pos) > 0 {
+			g = pos[0]
+		}
+		out, err = cmdSmoke(a, g)
+	case "milestones":
+		out, err = cmdMilestones(a)
+	case "spec":
+		out, err = cmdSpec(a, arg(pos, 0, "issue"))
 	}
 	if err != nil {
 		fatal(err.Error())
@@ -405,6 +427,14 @@ func printCLIHelp() {
                                                        per-frame sampler for timing/visual bugs
   issue --title T --actual A --steps S [--labels ...]  prefilled GitHub issue URL
 
+Workflow (same as the Studio web app):
+  investigate <issue> [--mode reproduce|testplan]      run a full investigation, print the report
+  queue [--type bug|story|all] [--group #g-*] [--milestone V] [--status S]   list the QA backlog
+  smoke [group]                                        run the Playwright smoke suite, print pass/fail
+  milestones                                           list open release milestones
+  spec <issue>                                         generate a Playwright regression test
+
+Serve the web app:  fleet-qa-mcp serve   (→ http://127.0.0.1:8799)
 Setup: --install-browsers | --auth | --provision-repo ; flags may appear anywhere.
 `)
 }
