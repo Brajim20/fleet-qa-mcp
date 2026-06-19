@@ -662,7 +662,7 @@ class Studio extends React.Component {
         {/* SIDEBAR */}
         {!v.navHidden && (
         <aside style={{...S("flex:none; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column;"), width:v.sidebarW+'px'}}>
-          <div style={{...S("height:60px; flex:none; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--border);"), padding:v.compact?'0':'0 18px', justifyContent:v.compact?'center':'flex-start'}}>
+          <button onClick={this.goDashboard} title="Back to dashboard" style={{...S("height:60px; flex:none; display:flex; align-items:center; gap:10px; border:none; border-bottom:1px solid var(--border); background:transparent; cursor:pointer; width:100%; text-align:left;"), padding:v.compact?'0':'0 18px', justifyContent:v.compact?'center':'flex-start'}}>
             <FleetLogo size={26}/>
             {!v.compact && (
               <div style={S("display:flex; flex-direction:column; line-height:1.15;")}>
@@ -670,7 +670,7 @@ class Studio extends React.Component {
                 <span style={S("color:var(--text3); font-size:10.5px; letter-spacing:.04em; text-transform:uppercase;")}>Fleet</span>
               </div>
             )}
-          </div>
+          </button>
           <nav style={{...S("display:flex; flex-direction:column; gap:2px;"), padding:v.compact?'14px 8px':'14px 12px'}}>
             <button onClick={this.goDashboard} style={v.navDashStyle} title="Dashboard">
               <Svg d="" ><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></Svg>{!v.compact && ' Dashboard'}
