@@ -53,8 +53,15 @@ The **Smoke tests** view runs your existing Playwright suite — it does **not**
 own copy. It resolves the suite at `$FLEET_REPO/tools/qa/playwright` (override with
 `SMOKE_DIR`), lists the groups under `tests/smoke/`, and runs the chosen group (or all)
 via `playwright test --project=e2e tests/smoke/<group>` against your resolved instance,
-then renders the pass/fail matrix. Read-only on the repo (only ephemeral Playwright
-artifacts are written); auth uses your instance token (passed as `FLEET_API_TOKEN`).
+then renders the pass/fail matrix **with each test's title**. Click a **Passed/Failed/
+Skipped** stat card to filter the list to that status. Read-only on the repo (only
+ephemeral Playwright artifacts are written); auth uses your instance token (passed as
+`FLEET_API_TOKEN`).
+
+Selecting a suite also **auto-loads its test plan** — a step-by-step outline of what each
+test does, parsed from the spec source (no run). A suite with no specs shows an empty
+state ("No available test cases for this suite"). Same data is available headless via
+`GET /api/smokes/plan?group=<g>` or the CLI `plan`/MCP `smoke_plan`.
 
 This is the same suite every QA/dev runs: point `FLEET_REPO` at your checkout (your branch)
 and `FLEET_URL` at your build, and "Run smokes" catches regressions you introduced — no

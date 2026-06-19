@@ -311,6 +311,25 @@ func registerMCP(s *server.MCPServer, a *qa.App) {
 					mcp.ParseString(r, "to_fix", ""), mcp.ParseString(r, "more_info", ""), splitCSV(mcp.ParseString(r, "labels", "")))
 			})(context.Background(), r)
 		})
+
+	s.AddTool(mcp.NewTool("smoke_run",
+		mcp.WithDescription("Run the Playwright smoke suite from the Fleet checkout against the live instance; returns the pass/fail matrix with test titles. Can take minutes."),
+		mcp.WithString("group", mcp.Description("smoke group/subdir or a spec path, e.g. 'software' or 'software/scripts.spec.ts'; empty = all")),
+		mcp.WithString("status", mcp.Description("show only matching results: passed | failed | skipped"))),
+		func(_ context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return wrap(func() (string, error) {
+				return cmdSmoke(a, mcp.ParseString(r, "group", ""), mcp.ParseString(r, "status", ""))
+			})(context.Background(), r)
+		})
+
+	s.AddTool(mcp.NewTool("smoke_plan",
+		mcp.WithDescription("Step-by-step outline of what each smoke test does, read from the spec source (never runs anything). Answers 'what does this suite cover?'."),
+		mcp.WithString("group", mcp.Description("smoke group/subdir or a spec path; empty = all"))),
+		func(_ context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return wrap(func() (string, error) {
+				return cmdPlan(a, mcp.ParseString(r, "group", ""))
+			})(context.Background(), r)
+		})
 }
 
 func req(r mcp.CallToolRequest, key string) (string, *mcp.CallToolResult) {
