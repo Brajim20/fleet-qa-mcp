@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Brajim20/fleet-qa-mcp/internal/browser"
@@ -126,7 +128,16 @@ func (a *App) FleetRequest(method, path, body string, confirm bool) (string, err
 	return fmt.Sprintf("[HTTP %d]%s\n%s", status, hint, string(out)), nil
 }
 
-func (a *App) BrowserEval(pageURL, js, screenshot string) (string, error) {
+// ShotOpts controls how BrowserEval captures its screenshot so the image shows
+// the actual bug rather than just whatever happens to be in the viewport.
+// Zero value = capture the viewport (the original behavior).
+type ShotOpts struct {
+	Selector  string // scroll this element into view; crop the shot to it (or outline it if Highlight)
+	FullPage  bool   // capture the whole scrollable page instead of the viewport
+	Highlight bool   // with Selector: outline it in red and capture the viewport (bug in context)
+}
+
+func (a *App) BrowserEval(pageURL, js, screenshot string, shot ShotOpts) (string, error) {
 	sess, err := browser.Open(a.Inst.URL, pageURL)
 	if err != nil {
 		return "", err
@@ -138,7 +149,10 @@ func (a *App) BrowserEval(pageURL, js, screenshot string) (string, error) {
 	}
 	note := ""
 	if screenshot != "" {
-		if p, serr := sess.Screenshot(screenshot); serr == nil {
+		// Playwright won't create the parent dir — make sure it exists so the
+		// shot doesn't silently fail.
+		_ = os.MkdirAll(filepath.Dir(screenshot), 0o755)
+		if p, serr := sess.Screenshot(screenshot, shot.Selector, shot.FullPage, shot.Highlight); serr == nil {
 			note = "\n(screenshot: " + p + ")"
 		} else {
 			note = "\n(screenshot FAILED: " + serr.Error() + ")" // don't swallow it

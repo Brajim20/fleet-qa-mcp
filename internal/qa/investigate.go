@@ -213,7 +213,7 @@ func (a *App) stepBrowser(issue *ghissue.Issue, shotDir, shotURLBase string) Ste
 		shotPath = filepath.Join(shotDir, fmt.Sprintf("issue-%d.png", issue.Number))
 	}
 	js := `() => ({ title: document.title, url: location.href, hasErrorBanner: !!document.querySelector('[class*="flash"],[class*="error"],[role="alert"]') })`
-	out, err := a.BrowserEval(pageURL, js, shotPath)
+	out, err := a.BrowserEval(pageURL, js, shotPath, ShotOpts{})
 	if err != nil {
 		return StepResult{
 			Kind: "reproduce", Sub: "browser", Title: "Reproduce in live browser", Tool: "browser.eval", Status: "warn",

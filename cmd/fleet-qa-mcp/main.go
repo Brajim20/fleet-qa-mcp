@@ -240,7 +240,10 @@ func registerMCP(s *server.MCPServer, a *qa.App) {
 		mcp.WithDescription("Open a URL in real Chromium with the stored session, run JS, return JSON. For repros/DOM measurement."),
 		mcp.WithString("url", mcp.Required()),
 		mcp.WithString("js", mcp.Required()),
-		mcp.WithString("screenshot")),
+		mcp.WithString("screenshot"),
+		mcp.WithString("shot_selector", mcp.Description("CSS selector of the buggy element; the screenshot scrolls to it and outlines/crops it so the image shows the actual bug (not just the viewport)")),
+		mcp.WithBoolean("full_page", mcp.Description("capture the whole scrollable page instead of just the viewport")),
+		mcp.WithBoolean("shot_highlight", mcp.Description("with shot_selector: outline the element and capture the viewport (bug in context) instead of cropping to it"))),
 		func(_ context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			u, bad := req(r, "url")
 			if bad != nil {
@@ -250,7 +253,13 @@ func registerMCP(s *server.MCPServer, a *qa.App) {
 			if bad != nil {
 				return bad, nil
 			}
-			return wrap(func() (string, error) { return a.BrowserEval(u, j, mcp.ParseString(r, "screenshot", "")) })(context.Background(), r)
+			return wrap(func() (string, error) {
+				return a.BrowserEval(u, j, mcp.ParseString(r, "screenshot", ""), qa.ShotOpts{
+					Selector:  mcp.ParseString(r, "shot_selector", ""),
+					FullPage:  mcp.ParseBoolean(r, "full_page", false),
+					Highlight: mcp.ParseBoolean(r, "shot_highlight", false),
+				})
+			})(context.Background(), r)
 		})
 
 	s.AddTool(mcp.NewTool("browser_sample_frames",
@@ -343,6 +352,9 @@ func runCLI(name string, args []string) {
 	body := fs.String("body", "", "request body")
 	confirm := fs.Bool("confirm", false, "allow non-GET writes")
 	shot := fs.String("screenshot", "", "screenshot path")
+	shotSel := fs.String("shot-selector", "", "browser-eval: CSS selector of the buggy element — the screenshot scrolls to it and crops/outlines it so the image shows the actual bug")
+	shotFull := fs.Bool("full-page", false, "browser-eval: capture the whole scrollable page instead of just the viewport")
+	shotHi := fs.Bool("shot-highlight", false, "browser-eval: with --shot-selector, outline the element and capture the viewport (bug in context) instead of cropping to it")
 	selectors := fs.String("selectors", "", "comma-separated CSS selectors (sample-frames)")
 	props := fs.String("props", "background-color,color", "comma-separated computed CSS props or 'text'")
 	duration := fs.Int("duration", 1500, "sampling duration in ms")
@@ -386,7 +398,8 @@ func runCLI(name string, args []string) {
 			out, err = a.FleetRequest(*method, arg(pos, 0, "path"), *body, *confirm)
 		}
 	case "browser-eval":
-		out, err = a.BrowserEval(arg(pos, 0, "url"), arg(pos, 1, "js"), *shot)
+		out, err = a.BrowserEval(arg(pos, 0, "url"), arg(pos, 1, "js"), *shot,
+			qa.ShotOpts{Selector: *shotSel, FullPage: *shotFull, Highlight: *shotHi})
 	case "sample-frames":
 		out, err = a.SampleFrames(arg(pos, 0, "url"), splitCSV(*selectors), splitCSV(*props), *duration, *trigger)
 	case "issue":
@@ -422,7 +435,8 @@ func printCLIHelp() {
   is-in-build <commit>           is a commit/PR/cherry-pick in the deployed build?
   log-search [--ref R] <needle>  which commit introduced a string
   request [--method M] [--body B] [--confirm] <path>   authenticated REST call
-  browser-eval <url> <js> [--screenshot P]             run JS in real Chromium
+  browser-eval <url> <js> [--screenshot P [--shot-selector CSS [--shot-highlight]] [--full-page]]
+                                                       run JS in real Chromium; --shot-selector crops/outlines the buggy element so the image shows the actual bug
   sample-frames <url> --selectors "a,b" [--props ...] [--duration N] [--trigger JS]
                                                        per-frame sampler for timing/visual bugs
   issue --title T --actual A --steps S [--labels ...]  prefilled GitHub issue URL
