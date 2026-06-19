@@ -118,6 +118,8 @@ class Studio extends React.Component {
     liveVerdict: {}, liveConfirmed: {}, pending: 0,
     // QA queue (real open bugs) + generated-spec modal.
     queue: [], queueLoading: false, queueType: 'bug', queueGroup: '#g-software', queueStatus: '', queueMilestone: '', milestones: [], spec: null,
+    // Smoke suite runner.
+    smokeAvail: null, smokeMsg: '', smokeDir: '', smokeGroups: [], smokeGroup: '', smokeRun: null, smokeRunning: false,
   };
   // Fleet engineering product groups (the #g-* labels) for the queue filter,
   // matching the org's project boards (github.com/orgs/fleetdm/projects).
@@ -241,6 +243,23 @@ class Studio extends React.Component {
   setQueueGroup = (e) => this.setState({ queueGroup:e.target.value }, () => this.loadQueue());         // server-side
   setQueueMilestone = (e) => this.setState({ queueMilestone:e.target.value }, () => this.loadQueue()); // server-side
   setQueueStatus = (e) => this.setState({ queueStatus:e.target.value });                                // client-side
+  // ---- smoke suite ----
+  goSmokes = () => { this.setState({ view:'smokes', targetOpen:false, modal:null }); if (this.state.smokeAvail===null) this.loadSmokes(); };
+  loadSmokes(){
+    fetch('/api/smokes').then(r=>r.json())
+      .then(d => this.setState({ smokeAvail:!!d.available, smokeMsg:d.message||'', smokeDir:d.dir||'', smokeGroups:d.groups||[] }))
+      .catch(()=>this.setState({ smokeAvail:false, smokeMsg:'Could not reach the smoke runner' }));
+  }
+  setSmokeGroup = (e) => this.setState({ smokeGroup:e.target.value });
+  runSmokes = () => {
+    if (this.state.smokeRunning) return;
+    this.setState({ smokeRunning:true, smokeRun:null });
+    fetch('/api/smokes/run', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ group:this.state.smokeGroup }) })
+      .then(r=>r.json())
+      .then(run => this.setState({ smokeRunning:false, smokeRun:run }))
+      .catch(e => this.setState({ smokeRunning:false, toast:'Smoke run error: '+e.message }, this.flashToast));
+  };
+
   // ---- generated Playwright spec ----
   genSpec = (n) => {
     fetch('/api/spec', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ number:n }) })
@@ -584,10 +603,11 @@ class Studio extends React.Component {
     const crumbNum = liveActive ? liveActive.number : (inv ? inv.number : null);
     return {
       themeClass:isDark?'':'theme-light', isDark, isLight:!isDark,
-      isDashboard:s.view==='dashboard', isNew:s.view==='new', isDetail:s.view==='detail', isQueue:s.view==='queue',
-      crumb: s.view==='dashboard'?'Investigations':s.view==='new'?'New investigation':s.view==='queue'?'QA queue':(crumbNum?'#'+crumbNum:'Investigation'),
-      navDashStyle:navBtn(s.view==='dashboard'), navNewStyle:navBtn(s.view==='new'), navQueueStyle:navBtn(s.view==='queue'),
+      isDashboard:s.view==='dashboard', isNew:s.view==='new', isDetail:s.view==='detail', isQueue:s.view==='queue', isSmokes:s.view==='smokes',
+      crumb: s.view==='dashboard'?'Investigations':s.view==='new'?'New investigation':s.view==='queue'?'QA queue':s.view==='smokes'?'Smoke tests':(crumbNum?'#'+crumbNum:'Investigation'),
+      navDashStyle:navBtn(s.view==='dashboard'), navNewStyle:navBtn(s.view==='new'), navQueueStyle:navBtn(s.view==='queue'), navSmokesStyle:navBtn(s.view==='smokes'),
       queue:s.queue, queueLoading:s.queueLoading, queueType:s.queueType, queueGroup:s.queueGroup, queueStatus:s.queueStatus, queueMilestone:s.queueMilestone, milestones:s.milestones, spec:s.spec,
+      smokeAvail:s.smokeAvail, smokeMsg:s.smokeMsg, smokeDir:s.smokeDir, smokeGroups:s.smokeGroups, smokeGroup:s.smokeGroup, smokeRun:s.smokeRun, smokeRunning:s.smokeRunning,
       navRecent, investigations, stats, examples, targetOpen:s.targetOpen, live:s.live, agent:s.agent, liveActive,
       urlInput:s.urlInput, inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
       runLabel: s.running?'Running…':'Run remaining checks',
@@ -620,6 +640,11 @@ class Studio extends React.Component {
             {v.live && (
               <button onClick={this.goQueue} style={v.navQueueStyle}>
                 <Svg><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></Svg> QA queue
+              </button>
+            )}
+            {v.live && (
+              <button onClick={this.goSmokes} style={v.navSmokesStyle}>
+                <Svg><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></Svg> Smoke tests
               </button>
             )}
           </nav>
@@ -688,6 +713,7 @@ class Studio extends React.Component {
             {v.isDashboard && this.renderDashboard(v)}
             {v.isNew && this.renderNew(v)}
             {v.isQueue && this.renderQueue(v)}
+            {v.isSmokes && this.renderSmokes(v)}
             {v.isDetail && (v.liveActive ? this.renderLiveDetail(v.liveActive, v) : this.renderDetail(v))}
           </main>
         </div>
@@ -979,6 +1005,73 @@ class Studio extends React.Component {
             <div style={S("margin-top:14px; padding:13px 15px; background:var(--surface); border:1px solid var(--border); border-radius:8px; display:flex; gap:9px;")}><Svg w={15} h={15} stroke="var(--text3)" style={S("flex:none; margin-top:1px;")}><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></Svg><span style={S("font-size:11.5px; color:var(--text3); line-height:1.5;")}>Reads are free. Live-instance writes and issue submission always require an explicit confirm.</span></div>
           </div>
         </div>
+      </div>
+    );
+  }
+
+  renderSmokes(v){
+    const selStyle = S("height:34px; padding:0 10px; background:var(--surface); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:12.5px;");
+    const run = v.smokeRun;
+    const dot = (st) => ({passed:'var(--success)',failed:'var(--danger)',skipped:'var(--text3)'}[st]||'var(--text3)');
+    return (
+      <div className="qa-fade" style={S("max-width:1080px; margin:0 auto; padding:32px;")}>
+        <h1 style={S("color:var(--text); font-size:24px; margin:0 0 4px;")}>Smoke tests</h1>
+        <p style={S("color:var(--text3); font-size:14px; margin:0 0 20px;")}>Runs your Playwright smoke suite from the checkout against <b style={{color:'var(--text2)'}}>{INSTANCE_HOST}</b> — the same <span style={S("font-family:var(--font-mono);")}>npm run test:smoke</span>, read-only on the repo.</p>
+
+        {v.smokeAvail===false && (
+          <div style={S("display:flex; gap:10px; padding:14px 16px; background:var(--well); border:1px solid var(--border); border-radius:8px; color:var(--text2); font-size:13px;")}>
+            <Svg w={16} h={16} stroke="var(--warning)" sw={2.2} style={S("flex:none; margin-top:1px;")} d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z|M12 9v4M12 17h.01"/>
+            <span>{v.smokeMsg}</span>
+          </div>
+        )}
+
+        {v.smokeAvail && (<>
+          <div style={S("display:flex; gap:10px; align-items:center; margin-bottom:18px; flex-wrap:wrap;")}>
+            <span style={S("color:var(--text3); font-size:12px;")}>Suite</span>
+            <select value={v.smokeGroup} onChange={this.setSmokeGroup} disabled={v.smokeRunning} style={selStyle}>
+              <option value="">All smoke tests</option>
+              {v.smokeGroups.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+            <button onClick={this.runSmokes} disabled={v.smokeRunning} style={S("height:34px; padding:0 18px; background:var(--accent); color:#1a1c21; border:none; border-radius:6px; font-weight:600; font-size:13px; opacity:"+(v.smokeRunning?'.6':'1')+";")}>
+              {v.smokeRunning ? 'Running…' : 'Run smokes'}
+            </button>
+            <span style={S("color:var(--text3); font-size:11.5px;")}>{v.smokeDir}</span>
+          </div>
+
+          {v.smokeRunning && (
+            <div style={S("display:flex; align-items:center; gap:12px; padding:16px; background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-bottom:16px;")}>
+              <span className="qa-spin" style={{width:'18px',height:'18px',border:'2.5px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',display:'block',flex:'none'}}/>
+              <span style={S("color:var(--text2); font-size:13px;")}>Running the {v.smokeGroup||'full'} smoke suite against {INSTANCE_HOST}… this can take a few minutes.</span>
+            </div>
+          )}
+
+          {run && !v.smokeRunning && (<>
+            {run.error
+              ? <div style={S("display:flex; gap:10px; padding:14px 16px; background:rgba(255,92,131,.10); border:1px solid rgba(255,92,131,.3); border-radius:8px; color:var(--text2); font-size:13px;")}><Svg w={16} h={16} stroke="var(--danger)" sw={2.2} style={S("flex:none; margin-top:1px;")} d="M12 9v4M12 17h.01|M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><span>{run.error}</span></div>
+              : (<>
+                <div style={S("display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:18px;")}>
+                  {[['Passed',run.passed,'#3db67b'],['Failed',run.failed,'#ff5c83'],['Skipped',run.skipped,'#8b8fa2'],['Duration',Math.round(run.durationMs/1000)+'s','#6a67fe']].map(([lbl,val,col])=>(
+                    <div key={lbl} style={S("background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px 18px;")}>
+                      <div style={{fontSize:'26px',fontWeight:600,color:col,fontVariantNumeric:'tabular-nums',lineHeight:1}}>{val}</div>
+                      <div style={S("color:var(--text3); font-size:12.5px; margin-top:6px;")}>{lbl}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;")}>
+                  {run.results.map((res,i)=>(
+                    <div key={i} style={S("display:grid; grid-template-columns:20px minmax(0,1fr) 70px; gap:12px; align-items:center; padding:11px 18px; border-bottom:1px solid var(--border);")}>
+                      <span style={{width:'10px',height:'10px',borderRadius:'50%',background:dot(res.status),flex:'none'}}/>
+                      <span style={S("min-width:0;")}>
+                        <span style={S("display:block; color:var(--text); font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{res.title}</span>
+                        <span style={S("display:block; color:var(--text3); font-size:11px; font-family:var(--font-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{res.file.replace('tests/smoke/','')}{res.error?' — '+res.error:''}</span>
+                      </span>
+                      <span style={{textAlign:'right',fontSize:'11.5px',fontWeight:600,color:dot(res.status),textTransform:'uppercase'}}>{res.status}</span>
+                    </div>
+                  ))}
+                </div>
+              </>)}
+          </>)}
+        </>)}
       </div>
     );
   }

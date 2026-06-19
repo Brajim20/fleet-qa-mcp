@@ -48,6 +48,19 @@ autonomous agent is in the loop.
 What to grep / which API to hit is auto-derived from the issue text (heuristics in
 `internal/qa/investigate.go`); the human owns the verdict.
 
+### Smoke tests
+The **Smoke tests** view runs your existing Playwright suite — it does **not** ship its
+own copy. It resolves the suite at `$FLEET_REPO/tools/qa/playwright` (override with
+`SMOKE_DIR`), lists the groups under `tests/smoke/`, and runs the chosen group (or all)
+via `playwright test --project=e2e tests/smoke/<group>` against your resolved instance,
+then renders the pass/fail matrix. Read-only on the repo (only ephemeral Playwright
+artifacts are written); auth uses your instance token (passed as `FLEET_API_TOKEN`).
+
+This is the same suite every QA/dev runs: point `FLEET_REPO` at your checkout (your branch)
+and `FLEET_URL` at your build, and "Run smokes" catches regressions you introduced — no
+per-user copies. (Requires the suite to exist in that checkout, i.e. merged into Fleet or
+on your branch, with `npm install` + `npx playwright install` done once.)
+
 ### Reproduce / Run test plan
 The queue's action button is type-aware, and the detail view offers the same:
 - **Reproduce** (bugs) — parses the ticket's *Steps to reproduce* and performs each

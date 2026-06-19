@@ -10,6 +10,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -24,6 +25,7 @@ import (
 	"github.com/Brajim20/fleet-qa-mcp/internal/ghissue"
 	"github.com/Brajim20/fleet-qa-mcp/internal/llm"
 	"github.com/Brajim20/fleet-qa-mcp/internal/qa"
+	"github.com/Brajim20/fleet-qa-mcp/internal/smoke"
 )
 
 // Server wires the qa core to HTTP. It keeps an in-memory log of investigations
@@ -58,6 +60,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/queue", s.handleQueue)
 	mux.HandleFunc("/api/milestones", s.handleMilestones)
+	mux.HandleFunc("/api/smokes", s.handleSmokes)       // list groups + availability
+	mux.HandleFunc("/api/smokes/run", s.handleSmokeRun) // run a group (or all)
 	mux.HandleFunc("/api/investigations", s.handleList)
 	mux.HandleFunc("/api/investigate", s.handleInvestigate)
 	mux.HandleFunc("/api/report", s.handleReport)
@@ -148,6 +152,35 @@ func (s *Server) handleMilestones(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"milestones": ms})
+}
+
+// handleSmokes reports the smoke-suite location, availability, and groups.
+func (s *Server) handleSmokes(w http.ResponseWriter, r *http.Request) {
+	dir := smoke.Dir(s.app.Repo)
+	ok, msg := smoke.Available(dir)
+	out := map[string]any{"available": ok, "dir": dir, "message": msg}
+	if ok {
+		out["groups"] = smoke.Groups(dir)
+	}
+	writeJSON(w, 200, out)
+}
+
+// handleSmokeRun runs the smoke suite (group, or all when empty) from the user's
+// checkout against the resolved instance. Read-only on the repo; can take minutes.
+func (s *Server) handleSmokeRun(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Group string `json:"group"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&in)
+	dir := smoke.Dir(s.app.Repo)
+	if ok, msg := smoke.Available(dir); !ok {
+		writeErr(w, 400, msg)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), smoke.DefaultTimeout)
+	defer cancel()
+	run := smoke.RunGroup(ctx, dir, in.Group, s.app.Inst.URL, s.app.Inst.Token)
+	writeJSON(w, 200, run)
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
