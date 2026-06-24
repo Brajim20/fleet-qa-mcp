@@ -69,7 +69,7 @@ func runHTTP(args []string) {
 	must(err)
 
 	srv := httpapi.New(a, *studio)
-	fmt.Printf("Fleet QA Studio → http://%s\n", *addr)
+	fmt.Printf("Fleet QA Studio \u2192 http://%s\n", *addr)
 	fmt.Printf("  instance: %s (%s)\n  studio:   %s\n", a.Inst.URL, a.Inst.Source, *studio)
 	must(http.ListenAndServe(*addr, srv.Handler())) //nolint:gosec // localhost dev server
 }
@@ -311,6 +311,20 @@ func registerMCP(s *server.MCPServer, a *qa.App) {
 					mcp.ParseString(r, "to_fix", ""), mcp.ParseString(r, "more_info", ""), splitCSV(mcp.ParseString(r, "labels", "")))
 			})(context.Background(), r)
 		})
+
+	s.AddTool(mcp.NewTool("investigate",
+		mcp.WithDescription("Run a full QA investigation for a Fleet GitHub issue: fetch the issue, reproduce via API + browser, root-cause in deployed code, classify released/unreleased, and draft a prefilled bug report. Returns structured evidence + verdict."),
+		mcp.WithString("issue", mcp.Required(), mcp.Description("GitHub issue number or URL, e.g. 47812 or https://github.com/fleetdm/fleet/issues/47812")),
+		mcp.WithString("mode", mcp.Description("'' (general investigation), 'reproduce' (follow the bug's steps to reproduce), or 'testplan' (walk the story's test plan)"))),
+		func(_ context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			ref, bad := req(r, "issue")
+			if bad != nil {
+				return bad, nil
+			}
+			return wrap(func() (string, error) {
+				return cmdInvestigate(a, ref, mcp.ParseString(r, "mode", ""))
+			})(context.Background(), r)
+		})
 }
 
 func req(r mcp.CallToolRequest, key string) (string, *mcp.CallToolResult) {
@@ -448,7 +462,7 @@ Workflow (same as the Studio web app):
   milestones                                           list open release milestones
   spec <issue>                                         generate a Playwright regression test
 
-Serve the web app:  fleet-qa-mcp serve   (→ http://127.0.0.1:8799)
+Serve the web app:  fleet-qa-mcp serve   (\u2192 http://127.0.0.1:8799)
 Setup: --install-browsers | --auth | --provision-repo ; flags may appear anywhere.
 `)
 }
