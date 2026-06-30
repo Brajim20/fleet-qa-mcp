@@ -2,10 +2,10 @@
 
 A QA toolkit for [Fleet](https://github.com/fleetdm/fleet) with **three front-ends over one
 shared core**: an **MCP server** (for Claude Code / Cursor / VS Code), a **deterministic
-CLI** (for scripting / CI), and **Fleet QA Studio** — a web app that runs full
-investigations end-to-end. It reproduces issues, root-causes in the *deployed* code,
-checks whether a PR/cherry-pick is in the running build, drives a real browser, and drafts
-prefilled GitHub issues — the manual QA workflow, packaged so anyone can reuse it.
+CLI** (for scripting / CI), and **Fleet QA Studio** — a web app for the QA queue and smoke
+runs. It reproduces issues, root-causes in the *deployed* code, checks whether a
+PR/cherry-pick is in the running build, drives a real browser, and drafts prefilled GitHub
+issues — the manual QA workflow, packaged so anyone can reuse it.
 
 ## Quick start
 
@@ -30,11 +30,12 @@ It's built so **anyone runs it locally with their own creds** — no shared serv
 
 `make studio` → <http://127.0.0.1:8799> — the web front-end over the same core:
 
-- **New investigation** — paste a GitHub issue; it reproduces against the live build, root-causes in the deployed source, classifies released vs unreleased, and proposes a verdict you confirm.
 - **QA queue** — open Fleet `bug`/`story` issues filtered by **type · product group · milestone · status** (real GitHub Project board statuses); investigate any of them.
 - **Reproduce / Run test plan** — execute a ticket's own *Steps to reproduce* (bugs) or *Test plan* (stories) against the live build.
 - **Smoke tests** — run your Playwright smoke suite per product group and see the pass/fail matrix.
 - On a verdict: **prefilled bug draft** (Fleet template, never auto-posted) or a **generated Playwright regression test**.
+
+> To run a free-form investigation, use the `/investigate` skill in Claude Code (see below) or the `investigate` CLI command instead.
 
 ### Per-feature setup (each user, runs locally)
 
@@ -63,6 +64,7 @@ It's built so **anyone runs it locally with their own creds** — no shared serv
 | `browser_eval` | `browser-eval` | run JS in real Chromium, optional screenshot |
 | `browser_sample_frames` | `sample-frames` | per-frame sampler for timing/visual bugs |
 | `build_issue_url` | `issue` | **prefilled** GitHub issue URL (never submits) |
+| `investigate` | `investigate` | full investigation pipeline (see below) |
 
 ### Workflow commands (CLI — same orchestrations as the Studio web app)
 
@@ -76,9 +78,26 @@ It's built so **anyone runs it locally with their own creds** — no shared serv
 
 e.g. `fleet-qa-mcp queue --group '#g-software' --milestone 4.87.0 --status 'Ready for release'`
 
+## /investigate skill
+
+The server ships a built-in `/investigate` skill available in **any** Claude Code project
+that has `fleet-qa` configured — no need to have this repo open.
+
+In Claude Code, type `/mcp__fleet-qa__investigate` (or just `/investigate` if it resolves),
+pass the issue number or URL, and Claude will:
+
+1. Call `whoami` to confirm the live instance and deployed revision.
+2. Run the `investigate` tool — fetches the issue, hits the relevant API, opens the page in
+   real Chromium, greps the deployed source, classifies released/unreleased.
+3. Deepen with individual tools as needed (`code_at_rev`, `grep_code`, `is_in_build`, …).
+4. Produce a verdict block and a prefilled bug-report URL for your review.
+
+The same pipeline is also available as `./build/fleet-qa-mcp investigate <issue>` from the
+CLI, or via the **QA queue** tab in Fleet QA Studio.
+
 ## Investigations: AI agent or heuristic engine
 
-`make studio` runs full investigations end-to-end. Two engines, picked automatically:
+Two engines, picked automatically:
 
 - **AI agent** (when `ANTHROPIC_API_KEY` is set): Claude reads the issue and drives the
   read-only tools in a loop — calling the API, opening a real browser, grepping the
