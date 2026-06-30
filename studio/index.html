@@ -109,7 +109,7 @@ class Studio extends React.Component {
   state = {
     theme: 'dark', view: 'dashboard', activeId: null, openSteps: {}, modal: null,
     verdict: null, confirmed: {}, copied: false, targetOpen: false,
-    urlInput: 'https://github.com/fleetdm/fleet/issues/47712', toast: null, running: false, runTick: 0,
+    toast: null, running: false, runTick: 0,
     // Resolved target instance (version/rev filled live from the instance when reachable).
     inst: { version: '4.87.0-rc.2606171916', rev: '9c17a71c43', tier: 'Premium', built: 'Jun 17, 2026 19:16 UTC', connected: true },
     // LIVE mode — set true when served by the fleet-qa-mcp `serve` backend.
@@ -340,7 +340,6 @@ class Studio extends React.Component {
   get active(){ return this.invByNumber(this.state.activeId); }
 
   goDashboard = () => this.setState({ view:'dashboard', targetOpen:false, modal:null });
-  goNew = () => this.setState({ view:'new', targetOpen:false, modal:null });
   toggleTheme = () => this.setState(s => ({ theme: s.theme==='dark'?'light':'dark' }));
   toggleTarget = () => this.setState(s => ({ targetOpen: !s.targetOpen }));
   toggleNav = () => this.setState(s => ({ navHidden: !s.navHidden }));
@@ -354,13 +353,6 @@ class Studio extends React.Component {
       openSteps: light ? {issue:true} : {issue:true,reproduce:true,rootcause:true,buildcheck:true},
       running:false, runTick: light ? 2 : 99 });
   };
-  runFromInput = () => {
-    if (this.state.live) { this.runLive(this.state.urlInput); return; }
-    const m = (this.state.urlInput||'').match(/(\d{4,6})/);
-    const n = m ? parseInt(m[1],10) : 47712;
-    this.openInv(this.invByNumber(n) ? n : 47712);
-  };
-  onUrlInput = (e) => this.setState({ urlInput: e.target.value });
   toggleStep = (k) => this.setState(s => ({ openSteps:{...s.openSteps,[k]:!s.openSteps[k]} }));
   expandAll = () => { const o={}; this.stepKinds().forEach(k=>o[k]=true); this.setState({openSteps:o}); };
   collapseAll = () => this.setState({ openSteps:{} });
@@ -629,14 +621,14 @@ class Studio extends React.Component {
     const crumbNum = liveActive ? liveActive.number : (inv ? inv.number : null);
     return {
       themeClass:isDark?'':'theme-light', isDark, isLight:!isDark,
-      isDashboard:s.view==='dashboard', isNew:s.view==='new', isDetail:s.view==='detail', isQueue:s.view==='queue', isSmokes:s.view==='smokes',
-      crumb: s.view==='dashboard'?'Investigations':s.view==='new'?'New investigation':s.view==='queue'?'QA queue':s.view==='smokes'?'Smoke tests':(crumbNum?'#'+crumbNum:'Investigation'),
-      navDashStyle:navBtn(s.view==='dashboard'), navNewStyle:navBtn(s.view==='new'), navQueueStyle:navBtn(s.view==='queue'), navSmokesStyle:navBtn(s.view==='smokes'),
+      isDashboard:s.view==='dashboard', isDetail:s.view==='detail', isQueue:s.view==='queue', isSmokes:s.view==='smokes',
+      crumb: s.view==='dashboard'?'Investigations':s.view==='queue'?'QA queue':s.view==='smokes'?'Smoke tests':(crumbNum?'#'+crumbNum:'Investigation'),
+      navDashStyle:navBtn(s.view==='dashboard'), navQueueStyle:navBtn(s.view==='queue'), navSmokesStyle:navBtn(s.view==='smokes'),
       queue:s.queue, queueLoading:s.queueLoading, queueType:s.queueType, queueGroup:s.queueGroup, queueStatus:s.queueStatus, queueMilestone:s.queueMilestone, milestones:s.milestones, spec:s.spec,
       smokeAvail:s.smokeAvail, smokeMsg:s.smokeMsg, smokeDir:s.smokeDir, smokeGroups:s.smokeGroups, smokeGroup:s.smokeGroup, smokeRun:s.smokeRun, smokeRunning:s.smokeRunning,
       compact, stackDetail, statsCols, sidebarW, navHidden:s.navHidden,
       navRecent, investigations, stats, examples, targetOpen:s.targetOpen, live:s.live, agent:s.agent, liveActive,
-      urlInput:s.urlInput, inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
+      inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
       runLabel: s.running?'Running…':'Run remaining checks',
       verdictOptions, verdictConfirmed, verdictUnconfirmed:!verdictConfirmed, confirmedBy:this.USER.name,
       qaComment:this.qaComment(), copyLabel:s.copied?'Copied':'Copy',
@@ -663,9 +655,6 @@ class Studio extends React.Component {
           <nav style={{...S("display:flex; flex-direction:column; gap:2px;"), padding:v.compact?'14px 8px':'14px 12px'}}>
             <button onClick={this.goDashboard} style={v.navDashStyle} title="Dashboard">
               <Svg d="" ><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></Svg>{!v.compact && ' Dashboard'}
-            </button>
-            <button onClick={this.goNew} style={v.navNewStyle} title="New investigation">
-              <Svg><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></Svg>{!v.compact && ' New investigation'}
             </button>
             {v.live && (
               <button onClick={this.goQueue} style={v.navQueueStyle} title="QA queue">
@@ -747,7 +736,6 @@ class Studio extends React.Component {
 
           <main style={S("flex:1; overflow:auto;")}>
             {v.isDashboard && this.renderDashboard(v)}
-            {v.isNew && this.renderNew(v)}
             {v.isQueue && this.renderQueue(v)}
             {v.isSmokes && this.renderSmokes(v)}
             {v.isDetail && (v.liveActive ? this.renderLiveDetail(v.liveActive, v) : this.renderDetail(v))}
@@ -801,9 +789,6 @@ class Studio extends React.Component {
             <h1 style={S("color:var(--text); font-size:24px; margin:0 0 4px;")}>Investigations</h1>
             <p style={S("color:var(--text3); font-size:14px; margin:0;")}>Evidence-backed verdicts against the live deployed build — not vibes.</p>
           </div>
-          <button onClick={this.goNew} style={S("display:flex; align-items:center; gap:8px; height:40px; padding:0 16px; background:var(--accent); color:#1a1c21; border:none; border-radius:6px; font-weight:600; font-size:13.5px;")}>
-            <Svg sw={2.2} d="M12 5v14M5 12h14"/> New investigation
-          </button>
         </div>
         <div style={S("display:grid; gap:14px; margin-bottom:24px; grid-template-columns:repeat("+v.statsCols+",1fr);")}>
           {v.stats.map((st,i)=>(
@@ -819,7 +804,7 @@ class Studio extends React.Component {
           </div>
           {v.live && v.investigations.length===0 && (
             <div style={S("padding:36px 20px; text-align:center; color:var(--text3); font-size:13px;")}>
-              No investigations yet this session. <button onClick={this.goNew} style={S("background:transparent; border:none; color:var(--accent); font-weight:600; font-size:13px; padding:0; cursor:pointer;")}>Start one →</button>
+              No investigations yet this session.
             </div>
           )}
           {v.investigations.map(item=>(
@@ -833,40 +818,6 @@ class Studio extends React.Component {
               <span><span style={{display:'inline-flex',alignItems:'center',gap:'6px',padding:'4px 10px',borderRadius:'20px',fontSize:'12px',fontWeight:600,whiteSpace:'nowrap',background:item.chipBg,color:item.chipFg}}><span style={{width:'6px',height:'6px',borderRadius:'50%',background:item.chipFg}}/>{item.status}</span></span>
               <span style={S("display:flex; align-items:center; gap:5px; color:var(--text3); font-size:12px;")}><Svg w={14} h={14} d="M3 7h18M3 12h18M3 17h18"/>{item.evidenceCount} steps</span>
               <span style={S("text-align:right; color:var(--text3); font-size:12px;")}>{item.updated}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  renderNew(v){
-    return (
-      <div className="qa-fade" style={S("max-width:680px; margin:0 auto; padding:56px 32px;")}>
-        <h1 style={S("color:var(--text); font-size:24px; margin:0 0 6px;")}>New investigation</h1>
-        <p style={S("color:var(--text3); font-size:14px; margin:0 0 14px;")}>Paste a GitHub issue and Fleet QA Studio reproduces it against the live deployed build, reads the source at the deployed revision, and gathers evidence for a verdict.</p>
-        {v.live && (
-          <div style={S("display:inline-flex; align-items:center; gap:7px; margin-bottom:24px; padding:5px 11px; border-radius:20px; font-size:11.5px; font-weight:600; background:var(--accent-tint); color:var(--accent);")}>
-            <span style={{width:'6px',height:'6px',borderRadius:'50%',background:'var(--accent)'}}/>
-            {v.agent ? 'AI agent — Claude drives the tools' : 'Heuristic engine — deterministic pipeline'}
-          </div>
-        )}
-        <label style={S("display:block; color:var(--text); font-weight:600; font-size:13px; margin-bottom:8px;")}>GitHub issue URL</label>
-        <div style={S("display:flex; gap:10px; margin-bottom:8px;")}>
-          <div style={S("flex:1; display:flex; align-items:center; gap:10px; height:46px; padding:0 14px; background:var(--surface); border:1px solid var(--border); border-radius:8px;")}>
-            <Svg w={18} h={18} fill="currentColor" stroke="none" style={S("color:var(--text3); flex:none;")} d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49v-1.7c-2.78.62-3.37-1.21-3.37-1.21-.46-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.36-2.22-.26-4.55-1.14-4.55-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.27 2.75 1.05a9.4 9.4 0 0 1 5 0c1.91-1.32 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9v2.81c0 .27.18.6.69.49A10.26 10.26 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/>
-            <input value={v.urlInput} onChange={this.onUrlInput} placeholder="https://github.com/fleetdm/fleet/issues/47712" style={S("flex:1; background:transparent; border:none; outline:none; color:var(--text); font-size:14px; font-family:var(--font-mono);")}/>
-          </div>
-          <button onClick={this.runFromInput} style={S("height:46px; padding:0 22px; background:var(--accent); color:#fff; border:none; border-radius:8px; font-weight:600; font-size:14px; white-space:nowrap;")}>Investigate</button>
-        </div>
-        <p style={S("color:var(--text3); font-size:12px; margin:0 0 24px;")}>Reads are free and safe. Writes to the live instance and issue submission always require an explicit confirm.</p>
-        <div style={S("color:var(--text3); font-size:12px; text-align:center; margin:8px 0 18px; position:relative;")}><span style={S("background:var(--bg); padding:0 12px; position:relative; z-index:1;")}>or try one of these</span><span style={S("position:absolute; left:0; right:0; top:50%; height:1px; background:var(--border);")}/></div>
-        <div style={S("display:flex; flex-direction:column; gap:10px;")}>
-          {v.examples.map(ex=>(
-            <button key={ex.number} onClick={ex.onRun} style={S("display:flex; align-items:center; gap:14px; text-align:left; padding:14px 16px; background:var(--surface); border:1px solid var(--border); border-radius:8px; color:var(--text2);")}>
-              <span style={S("font-family:var(--font-mono); font-size:12.5px; color:var(--accent); flex:none;")}>#{ex.number}</span>
-              <span style={S("flex:1; min-width:0;")}><span style={S("display:block; color:var(--text); font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{ex.title}</span><span style={S("color:var(--text3); font-size:11.5px;")}>{ex.hint}</span></span>
-              <Svg w={16} h={16} style={S("color:var(--text3); flex:none;")} d="m9 18 6-6-6-6"/>
             </button>
           ))}
         </div>

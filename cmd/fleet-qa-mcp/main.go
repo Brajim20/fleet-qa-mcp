@@ -325,6 +325,8 @@ func registerMCP(s *server.MCPServer, a *qa.App) {
 				return cmdInvestigate(a, ref, mcp.ParseString(r, "mode", ""))
 			})(context.Background(), r)
 		})
+
+	registerPrompts(s)
 }
 
 func req(r mcp.CallToolRequest, key string) (string, *mcp.CallToolResult) {
