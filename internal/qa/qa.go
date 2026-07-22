@@ -112,6 +112,36 @@ func (a *App) LogSearch(needle, ref, pathspec string) (string, error) {
 	return out, nil
 }
 
+// ReleasedIn chains log_search → tag --contains into one call: finds the commit
+// that introduced needle, then reports which stable Fleet release first shipped it.
+func (a *App) ReleasedIn(needle, pathspec, ref string) (string, error) {
+	if a.Repo == "" {
+		return "", fmt.Errorf("no Fleet source repo (set FLEET_REPO)")
+	}
+	if ref == "" {
+		ref = "origin/main"
+	}
+	commit, err := gitcode.IntroducingCommit(a.Repo, ref, needle, pathspec)
+	if err != nil {
+		return "", err
+	}
+	if commit == "" {
+		return fmt.Sprintf("(no commit found introducing %q on %s)", needle, ref), nil
+	}
+	status, first, err := a.ClassifyRelease(commit)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Introducing commit: %s\n", commit)
+	if status == "Released" {
+		fmt.Fprintf(&b, "First release:      %s\nStatus:             RELEASED — shipped to customers since %s", first, first)
+	} else {
+		fmt.Fprintf(&b, "First release:      (none)\nStatus:             UNRELEASED — not in any stable fleet-v* tag")
+	}
+	return b.String(), nil
+}
+
 func (a *App) FleetRequest(method, path, body string, confirm bool) (string, error) {
 	method = strings.ToUpper(method)
 	if method != "GET" && !confirm {
