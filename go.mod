@@ -12,7 +12,6 @@ require (
 
 require (
 	github.com/joho/godotenv v1.5.1
-	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/pflag v1.0.10
 )
 
@@ -25,5 +24,4 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
-	golang.org/x/sys v0.17.0 // indirect
 )
