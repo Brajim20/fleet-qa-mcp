@@ -220,6 +220,21 @@ func registerMCP(s *server.MCPServer, a *qa.App) {
 			})(context.Background(), r)
 		})
 
+	s.AddTool(mcp.NewTool("released_in",
+		mcp.WithDescription("When did this bug ship? Finds the commit that introduced a string, then reports the first stable Fleet release tag (fleet-vX.Y.Z) that contains it. Combines log_search + tag --contains in one call."),
+		mcp.WithString("needle", mcp.Required(), mcp.Description("string to search for in the git diff (same as log_search needle)")),
+		mcp.WithString("pathspec", mcp.DefaultString(""), mcp.Description("optional path filter, e.g. server/service/")),
+		mcp.WithString("ref", mcp.DefaultString("origin/main"), mcp.Description("git ref to search history from"))),
+		func(_ context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			n, bad := req(r, "needle")
+			if bad != nil {
+				return bad, nil
+			}
+			return wrap(func() (string, error) {
+				return a.ReleasedIn(n, mcp.ParseString(r, "pathspec", ""), mcp.ParseString(r, "ref", "origin/main"))
+			})(context.Background(), r)
+		})
+
 	s.AddTool(mcp.NewTool("fleet_request",
 		mcp.WithDescription("Authenticated REST call. Read-only unless confirm=true."),
 		mcp.WithString("method", mcp.DefaultString("GET")),
@@ -341,8 +356,8 @@ func req(r mcp.CallToolRequest, key string) (string, *mcp.CallToolResult) {
 
 var subcommands = map[string]bool{
 	"whoami": true, "code-at-rev": true, "grep": true, "is-in-build": true,
-	"log-search": true, "request": true, "browser-eval": true, "sample-frames": true,
-	"issue": true, "help": true,
+	"log-search": true, "released-in": true, "request": true, "browser-eval": true,
+	"sample-frames": true, "issue": true, "help": true,
 	// workflow commands (parity with the Studio web app)
 	"investigate": true, "queue": true, "smoke": true, "milestones": true, "spec": true,
 }
@@ -363,7 +378,7 @@ func runCLI(name string, args []string) {
 	// per-subcommand flags
 	rev := fs.String("rev", "", "git revision (default: deployed)")
 	pathspec := fs.String("pathspec", ".", "path filter")
-	ref := fs.String("ref", "origin/main", "git ref for log-search")
+	ref := fs.String("ref", "origin/main", "git ref for log-search / released-in")
 	method := fs.String("method", "GET", "HTTP method")
 	body := fs.String("body", "", "request body")
 	confirm := fs.Bool("confirm", false, "allow non-GET writes")
@@ -406,6 +421,8 @@ func runCLI(name string, args []string) {
 		out, err = a.IsInBuild(arg(pos, 0, "commit"))
 	case "log-search":
 		out, err = a.LogSearch(arg(pos, 0, "needle"), *ref, *pathspec)
+	case "released-in":
+		out, err = a.ReleasedIn(arg(pos, 0, "needle"), *pathspec, *ref)
 	case "request":
 		// Accept both `request <method> <path>` and `request <path>` (method via --method).
 		if len(pos) >= 2 {
@@ -450,6 +467,9 @@ func printCLIHelp() {
   grep [--pathspec P] <pattern>  git grep at the deployed revision
   is-in-build <commit>           is a commit/PR/cherry-pick in the deployed build?
   log-search [--ref R] <needle>  which commit introduced a string
+  released-in [--ref R] [--pathspec P] <needle>
+                                 when did this bug ship? finds the introducing commit
+                                 then reports the first stable fleet-vX.Y.Z release that contains it
   request [--method M] [--body B] [--confirm] <path>   authenticated REST call
   browser-eval <url> <js> [--screenshot P [--shot-selector CSS [--shot-highlight]] [--full-page]]
                                                        run JS in real Chromium; --shot-selector crops/outlines the buggy element so the image shows the actual bug
@@ -464,7 +484,7 @@ Workflow (same as the Studio web app):
   milestones                                           list open release milestones
   spec <issue>                                         generate a Playwright regression test
 
-Serve the web app:  fleet-qa-mcp serve   (\u2192 http://127.0.0.1:8799)
+Serve the web app:  fleet-qa-mcp serve   (→ http://127.0.0.1:8799)
 Setup: --install-browsers | --auth | --provision-repo ; flags may appear anywhere.
 `)
 }
