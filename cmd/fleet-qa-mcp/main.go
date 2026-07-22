@@ -69,7 +69,7 @@ func runHTTP(args []string) {
 	must(err)
 
 	srv := httpapi.New(a, *studio)
-	fmt.Printf("Fleet QA Studio \u2192 http://%s\n", *addr)
+	fmt.Printf("Fleet QA Studio → http://%s\n", *addr)
 	fmt.Printf("  instance: %s (%s)\n  studio:   %s\n", a.Inst.URL, a.Inst.Source, *studio)
 	must(http.ListenAndServe(*addr, srv.Handler())) //nolint:gosec // localhost dev server
 }
@@ -341,6 +341,25 @@ func registerMCP(s *server.MCPServer, a *qa.App) {
 			})(context.Background(), r)
 		})
 
+	s.AddTool(mcp.NewTool("smoke_run",
+		mcp.WithDescription("Run the Playwright smoke suite from the Fleet checkout against the live instance; returns the pass/fail matrix with test titles. Can take minutes."),
+		mcp.WithString("group", mcp.Description("smoke group/subdir or a spec path, e.g. 'software' or 'software/scripts.spec.ts'; empty = all")),
+		mcp.WithString("status", mcp.Description("show only matching results: passed | failed | skipped"))),
+		func(_ context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return wrap(func() (string, error) {
+				return cmdSmoke(a, mcp.ParseString(r, "group", ""), mcp.ParseString(r, "status", ""))
+			})(context.Background(), r)
+		})
+
+	s.AddTool(mcp.NewTool("smoke_plan",
+		mcp.WithDescription("Step-by-step outline of what each smoke test does, read from the spec source (never runs anything). Answers 'what does this suite cover?'."),
+		mcp.WithString("group", mcp.Description("smoke group/subdir or a spec path; empty = all"))),
+		func(_ context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return wrap(func() (string, error) {
+				return cmdPlan(a, mcp.ParseString(r, "group", ""))
+			})(context.Background(), r)
+		})
+
 	registerPrompts(s)
 }
 
@@ -359,7 +378,7 @@ var subcommands = map[string]bool{
 	"log-search": true, "released-in": true, "request": true, "browser-eval": true,
 	"sample-frames": true, "issue": true, "help": true,
 	// workflow commands (parity with the Studio web app)
-	"investigate": true, "queue": true, "smoke": true, "milestones": true, "spec": true,
+	"investigate": true, "queue": true, "smoke": true, "plan": true, "milestones": true, "spec": true,
 }
 
 func isSubcommand(s string) bool { return subcommands[s] }
@@ -370,8 +389,6 @@ func runCLI(name string, args []string) {
 		printCLIHelp()
 		return
 	}
-	// pflag parses flags interspersed with positionals, so users can put
-	// --flags before OR after positional args (stdlib flag can't).
 	fs := pflag.NewFlagSet(name, pflag.ExitOnError)
 	ctxName := fs.String("context", ctxFromEnv(), "~/.fleet/config context")
 
@@ -383,9 +400,9 @@ func runCLI(name string, args []string) {
 	body := fs.String("body", "", "request body")
 	confirm := fs.Bool("confirm", false, "allow non-GET writes")
 	shot := fs.String("screenshot", "", "screenshot path")
-	shotSel := fs.String("shot-selector", "", "browser-eval: CSS selector of the buggy element — the screenshot scrolls to it and crops/outlines it so the image shows the actual bug")
-	shotFull := fs.Bool("full-page", false, "browser-eval: capture the whole scrollable page instead of just the viewport")
-	shotHi := fs.Bool("shot-highlight", false, "browser-eval: with --shot-selector, outline the element and capture the viewport (bug in context) instead of cropping to it")
+	shotSel := fs.String("shot-selector", "", "browser-eval: CSS selector of the buggy element")
+	shotFull := fs.Bool("full-page", false, "browser-eval: capture the whole scrollable page")
+	shotHi := fs.Bool("shot-highlight", false, "browser-eval: outline the element and capture the viewport")
 	selectors := fs.String("selectors", "", "comma-separated CSS selectors (sample-frames)")
 	props := fs.String("props", "background-color,color", "comma-separated computed CSS props or 'text'")
 	duration := fs.Int("duration", 1500, "sampling duration in ms")
@@ -402,7 +419,7 @@ func runCLI(name string, args []string) {
 	qtype := fs.String("type", "bug", "queue: bug | story | all")
 	qgroup := fs.String("group", "", "queue: product group label, e.g. #g-software")
 	qmilestone := fs.String("milestone", "", "queue: milestone title or number")
-	qstatus := fs.String("status", "", "queue: filter by status")
+	qstatus := fs.String("status", "", "queue / smoke: filter by status")
 	_ = fs.Parse(args)
 	pos := fs.Args()
 
@@ -424,7 +441,6 @@ func runCLI(name string, args []string) {
 	case "released-in":
 		out, err = a.ReleasedIn(arg(pos, 0, "needle"), *pathspec, *ref)
 	case "request":
-		// Accept both `request <method> <path>` and `request <path>` (method via --method).
 		if len(pos) >= 2 {
 			out, err = a.FleetRequest(pos[0], pos[1], *body, *confirm)
 		} else {
@@ -446,7 +462,13 @@ func runCLI(name string, args []string) {
 		if len(pos) > 0 {
 			g = pos[0]
 		}
-		out, err = cmdSmoke(a, g)
+		out, err = cmdSmoke(a, g, *qstatus)
+	case "plan":
+		g := ""
+		if len(pos) > 0 {
+			g = pos[0]
+		}
+		out, err = cmdPlan(a, g)
 	case "milestones":
 		out, err = cmdMilestones(a)
 	case "spec":
@@ -472,7 +494,7 @@ func printCLIHelp() {
                                  then reports the first stable fleet-vX.Y.Z release that contains it
   request [--method M] [--body B] [--confirm] <path>   authenticated REST call
   browser-eval <url> <js> [--screenshot P [--shot-selector CSS [--shot-highlight]] [--full-page]]
-                                                       run JS in real Chromium; --shot-selector crops/outlines the buggy element so the image shows the actual bug
+                                                       run JS in real Chromium
   sample-frames <url> --selectors "a,b" [--props ...] [--duration N] [--trigger JS]
                                                        per-frame sampler for timing/visual bugs
   issue --title T --actual A --steps S [--labels ...]  prefilled GitHub issue URL
@@ -480,7 +502,8 @@ func printCLIHelp() {
 Workflow (same as the Studio web app):
   investigate <issue> [--mode reproduce|testplan]      run a full investigation, print the report
   queue [--type bug|story|all] [--group #g-*] [--milestone V] [--status S]   list the QA backlog
-  smoke [group]                                        run the Playwright smoke suite, print pass/fail
+  smoke [group] [--status passed|failed|skipped]       run the Playwright smoke suite; pass/fail matrix with test titles
+  plan [group|spec]                                    step-by-step outline of what each smoke test does (no run)
   milestones                                           list open release milestones
   spec <issue>                                         generate a Playwright regression test
 
