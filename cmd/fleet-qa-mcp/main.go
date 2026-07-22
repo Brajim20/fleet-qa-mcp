@@ -220,6 +220,21 @@ func registerMCP(s *server.MCPServer, a *qa.App) {
 			})(context.Background(), r)
 		})
 
+	s.AddTool(mcp.NewTool("released_in",
+		mcp.WithDescription("When did this bug ship? Finds the commit that introduced a string, then reports the first stable Fleet release tag (fleet-vX.Y.Z) that contains it. Combines log_search + tag --contains in one call."),
+		mcp.WithString("needle", mcp.Required(), mcp.Description("string to search for in the git diff (same as log_search needle)")),
+		mcp.WithString("pathspec", mcp.DefaultString(""), mcp.Description("optional path filter, e.g. server/service/")),
+		mcp.WithString("ref", mcp.DefaultString("origin/main"), mcp.Description("git ref to search history from"))),
+		func(_ context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			n, bad := req(r, "needle")
+			if bad != nil {
+				return bad, nil
+			}
+			return wrap(func() (string, error) {
+				return a.ReleasedIn(n, mcp.ParseString(r, "pathspec", ""), mcp.ParseString(r, "ref", "origin/main"))
+			})(context.Background(), r)
+		})
+
 	s.AddTool(mcp.NewTool("fleet_request",
 		mcp.WithDescription("Authenticated REST call. Read-only unless confirm=true."),
 		mcp.WithString("method", mcp.DefaultString("GET")),
@@ -312,6 +327,20 @@ func registerMCP(s *server.MCPServer, a *qa.App) {
 			})(context.Background(), r)
 		})
 
+	s.AddTool(mcp.NewTool("investigate",
+		mcp.WithDescription("Run a full QA investigation for a Fleet GitHub issue: fetch the issue, reproduce via API + browser, root-cause in deployed code, classify released/unreleased, and draft a prefilled bug report. Returns structured evidence + verdict."),
+		mcp.WithString("issue", mcp.Required(), mcp.Description("GitHub issue number or URL, e.g. 47812 or https://github.com/fleetdm/fleet/issues/47812")),
+		mcp.WithString("mode", mcp.Description("'' (general investigation), 'reproduce' (follow the bug's steps to reproduce), or 'testplan' (walk the story's test plan)"))),
+		func(_ context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			ref, bad := req(r, "issue")
+			if bad != nil {
+				return bad, nil
+			}
+			return wrap(func() (string, error) {
+				return cmdInvestigate(a, ref, mcp.ParseString(r, "mode", ""))
+			})(context.Background(), r)
+		})
+
 	s.AddTool(mcp.NewTool("smoke_run",
 		mcp.WithDescription("Run the Playwright smoke suite from the Fleet checkout against the live instance; returns the pass/fail matrix with test titles. Can take minutes."),
 		mcp.WithString("group", mcp.Description("smoke group/subdir or a spec path, e.g. 'software' or 'software/scripts.spec.ts'; empty = all")),
@@ -330,6 +359,8 @@ func registerMCP(s *server.MCPServer, a *qa.App) {
 				return cmdPlan(a, mcp.ParseString(r, "group", ""))
 			})(context.Background(), r)
 		})
+
+	registerPrompts(s)
 }
 
 func req(r mcp.CallToolRequest, key string) (string, *mcp.CallToolResult) {
@@ -344,8 +375,8 @@ func req(r mcp.CallToolRequest, key string) (string, *mcp.CallToolResult) {
 
 var subcommands = map[string]bool{
 	"whoami": true, "code-at-rev": true, "grep": true, "is-in-build": true,
-	"log-search": true, "request": true, "browser-eval": true, "sample-frames": true,
-	"issue": true, "help": true,
+	"log-search": true, "released-in": true, "request": true, "browser-eval": true,
+	"sample-frames": true, "issue": true, "help": true,
 	// workflow commands (parity with the Studio web app)
 	"investigate": true, "queue": true, "smoke": true, "plan": true, "milestones": true, "spec": true,
 }
@@ -358,22 +389,20 @@ func runCLI(name string, args []string) {
 		printCLIHelp()
 		return
 	}
-	// pflag parses flags interspersed with positionals, so users can put
-	// --flags before OR after positional args (stdlib flag can't).
 	fs := pflag.NewFlagSet(name, pflag.ExitOnError)
 	ctxName := fs.String("context", ctxFromEnv(), "~/.fleet/config context")
 
 	// per-subcommand flags
 	rev := fs.String("rev", "", "git revision (default: deployed)")
 	pathspec := fs.String("pathspec", ".", "path filter")
-	ref := fs.String("ref", "origin/main", "git ref for log-search")
+	ref := fs.String("ref", "origin/main", "git ref for log-search / released-in")
 	method := fs.String("method", "GET", "HTTP method")
 	body := fs.String("body", "", "request body")
 	confirm := fs.Bool("confirm", false, "allow non-GET writes")
 	shot := fs.String("screenshot", "", "screenshot path")
-	shotSel := fs.String("shot-selector", "", "browser-eval: CSS selector of the buggy element — the screenshot scrolls to it and crops/outlines it so the image shows the actual bug")
-	shotFull := fs.Bool("full-page", false, "browser-eval: capture the whole scrollable page instead of just the viewport")
-	shotHi := fs.Bool("shot-highlight", false, "browser-eval: with --shot-selector, outline the element and capture the viewport (bug in context) instead of cropping to it")
+	shotSel := fs.String("shot-selector", "", "browser-eval: CSS selector of the buggy element")
+	shotFull := fs.Bool("full-page", false, "browser-eval: capture the whole scrollable page")
+	shotHi := fs.Bool("shot-highlight", false, "browser-eval: outline the element and capture the viewport")
 	selectors := fs.String("selectors", "", "comma-separated CSS selectors (sample-frames)")
 	props := fs.String("props", "background-color,color", "comma-separated computed CSS props or 'text'")
 	duration := fs.Int("duration", 1500, "sampling duration in ms")
@@ -390,7 +419,7 @@ func runCLI(name string, args []string) {
 	qtype := fs.String("type", "bug", "queue: bug | story | all")
 	qgroup := fs.String("group", "", "queue: product group label, e.g. #g-software")
 	qmilestone := fs.String("milestone", "", "queue: milestone title or number")
-	qstatus := fs.String("status", "", "queue: filter by status")
+	qstatus := fs.String("status", "", "queue / smoke: filter by status")
 	_ = fs.Parse(args)
 	pos := fs.Args()
 
@@ -409,8 +438,9 @@ func runCLI(name string, args []string) {
 		out, err = a.IsInBuild(arg(pos, 0, "commit"))
 	case "log-search":
 		out, err = a.LogSearch(arg(pos, 0, "needle"), *ref, *pathspec)
+	case "released-in":
+		out, err = a.ReleasedIn(arg(pos, 0, "needle"), *pathspec, *ref)
 	case "request":
-		// Accept both `request <method> <path>` and `request <path>` (method via --method).
 		if len(pos) >= 2 {
 			out, err = a.FleetRequest(pos[0], pos[1], *body, *confirm)
 		} else {
@@ -459,9 +489,12 @@ func printCLIHelp() {
   grep [--pathspec P] <pattern>  git grep at the deployed revision
   is-in-build <commit>           is a commit/PR/cherry-pick in the deployed build?
   log-search [--ref R] <needle>  which commit introduced a string
+  released-in [--ref R] [--pathspec P] <needle>
+                                 when did this bug ship? finds the introducing commit
+                                 then reports the first stable fleet-vX.Y.Z release that contains it
   request [--method M] [--body B] [--confirm] <path>   authenticated REST call
   browser-eval <url> <js> [--screenshot P [--shot-selector CSS [--shot-highlight]] [--full-page]]
-                                                       run JS in real Chromium; --shot-selector crops/outlines the buggy element so the image shows the actual bug
+                                                       run JS in real Chromium
   sample-frames <url> --selectors "a,b" [--props ...] [--duration N] [--trigger JS]
                                                        per-frame sampler for timing/visual bugs
   issue --title T --actual A --steps S [--labels ...]  prefilled GitHub issue URL
