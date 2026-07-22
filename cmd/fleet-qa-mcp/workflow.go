@@ -128,8 +128,10 @@ func resolveMilestone(m string) (string, error) {
 	return "", fmt.Errorf("milestone %q not found (try `milestones`)", m)
 }
 
-// cmdSmoke runs the Playwright smoke suite (group, or all) and prints the matrix.
-func cmdSmoke(a *qa.App, group string) (string, error) {
+// cmdSmoke runs the Playwright smoke suite (group, or all) and prints the
+// matrix. statusFilter (passed|failed|skipped, "" = all) shows only matching
+// results; each row now includes the test title, not just the file.
+func cmdSmoke(a *qa.App, group, statusFilter string) (string, error) {
 	dir := smoke.Dir(a.Repo)
 	if ok, msg := smoke.Available(dir); !ok {
 		return "", fmt.Errorf("%s", msg)
@@ -140,15 +142,88 @@ func cmdSmoke(a *qa.App, group string) (string, error) {
 	if run.Error != "" {
 		return "", fmt.Errorf("%s", run.Error)
 	}
+	want := normalizeStatus(statusFilter)
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s — %d passed, %d failed, %d skipped (%ds)\n\n",
-		orAll(group), run.Passed, run.Failed, run.Skipped, run.Duration/1000)
+	fmt.Fprintf(&b, "%s — %d passed, %d failed, %d skipped (%ds)", orAll(group), run.Passed, run.Failed, run.Skipped, run.Duration/1000)
+	if want != "" {
+		fmt.Fprintf(&b, "  [showing %s only]", want)
+	}
+	b.WriteString("\n\n")
+	shown := 0
 	for _, r := range run.Results {
-		line := fmt.Sprintf("  [%-7s] %s", r.Status, strings.TrimPrefix(r.File, "tests/smoke/"))
+		if want != "" && r.Status != want {
+			continue
+		}
+		shown++
+		title := r.Title
+		if title == "" {
+			title = "(untitled)"
+		}
+		line := fmt.Sprintf("  [%-7s] %s › %s", r.Status, strings.TrimPrefix(r.File, "tests/smoke/"), title)
 		if r.Error != "" {
 			line += " — " + oneline(r.Error)
 		}
 		b.WriteString(line + "\n")
+	}
+	if want != "" && shown == 0 {
+		fmt.Fprintf(&b, "  (no %s tests)\n", want)
+	}
+	return b.String(), nil
+}
+
+// normalizeStatus maps loose user input (fail/failed/F) to a canonical status.
+func normalizeStatus(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "all":
+		return ""
+	case "fail", "failed", "failures", "f":
+		return "failed"
+	case "pass", "passed", "p":
+		return "passed"
+	case "skip", "skipped", "s":
+		return "skipped"
+	default:
+		return strings.ToLower(s)
+	}
+}
+
+// cmdPlan reads the spec source for a group/spec and prints a step-by-step
+// outline of each test — what it does, without running it.
+func cmdPlan(a *qa.App, group string) (string, error) {
+	dir := smoke.Dir(a.Repo)
+	if ok, msg := smoke.Available(dir); !ok {
+		return "", fmt.Errorf("%s", msg)
+	}
+	plans, err := smoke.Plan(dir, group)
+	if err != nil {
+		return "", err
+	}
+	if len(plans) == 0 {
+		return "(no tests found for " + orAll(group) + ")", nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Test plan — %s (%d tests)\n", orAll(group), len(plans))
+	lastFile := ""
+	for _, p := range plans {
+		if p.File != lastFile {
+			lastFile = p.File
+			fmt.Fprintf(&b, "\n%s\n", p.File)
+			if p.FileSummary != "" {
+				fmt.Fprintf(&b, "  %s\n", p.FileSummary)
+			}
+		}
+		name := p.Title
+		if p.Describe != "" {
+			name = p.Describe + " › " + p.Title
+		}
+		fmt.Fprintf(&b, "\n  ▸ %s\n", name)
+		if len(p.Steps) == 0 {
+			b.WriteString("      (no extractable steps)\n")
+			continue
+		}
+		for i, s := range p.Steps {
+			fmt.Fprintf(&b, "      %d. %s\n", i+1, s)
+		}
 	}
 	return b.String(), nil
 }
