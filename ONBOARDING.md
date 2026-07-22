@@ -62,9 +62,11 @@ Copy `.env.example` → `.env` (gitignored) for any overrides.
 | `is_in_build` | is a commit / PR-merge / cherry-pick in the running build? |
 | `log_search` | which commit/PR introduced a string |
 | `fleet_request` | authenticated REST (read-only unless `confirm=true`) |
-| `browser_eval` | open a URL in real Chromium, run JS, optional screenshot — for repros & DOM measurement |
+| `browser_eval` | open a URL in real Chromium, run JS, optional screenshot — for repros & DOM measurement. `shot_selector` scrolls to + outlines the buggy element so the image shows the actual bug; `full_page` captures the whole page |
 | `browser_sample_frames` | per-frame sampler for timing/visual bugs (flashes, theme desync) — records computed-style props across an optional trigger, returns a collapsed transition log |
 | `build_issue_url` | **prefilled** GitHub issue URL from the bug-report template |
+| `smoke_run` | run the Playwright smoke suite against the live instance; pass/fail matrix with test titles, optional `status` filter (passed/failed/skipped) |
+| `smoke_plan` | step-by-step outline of what each smoke test does, from the spec source — never runs anything |
 
 ---
 

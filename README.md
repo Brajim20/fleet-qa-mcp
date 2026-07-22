@@ -85,7 +85,7 @@ e.g. `fleet-qa-mcp queue --group '#g-software' --milestone 4.87.0 --status 'Read
 
 ```bash
 fleet-qa-mcp released-in "someSymbolOrString"          # when did this bug ship?
-fleet-qa-mcp smoke software --status failed            # only the red software smokes
+fleet-qa-mcp smoke software --status failed            # only the red software smokes (with test titles)
 fleet-qa-mcp plan software/scripts.spec.ts             # what each test in one spec actually does
 # screenshot the actual bug element, scrolled into view + outlined:
 fleet-qa-mcp browser-eval https://your.instance/policies/new '() => ({})' \

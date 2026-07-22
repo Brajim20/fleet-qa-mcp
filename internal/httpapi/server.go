@@ -60,8 +60,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/queue", s.handleQueue)
 	mux.HandleFunc("/api/milestones", s.handleMilestones)
-	mux.HandleFunc("/api/smokes", s.handleSmokes)       // list groups + availability
-	mux.HandleFunc("/api/smokes/run", s.handleSmokeRun) // run a group (or all)
+	mux.HandleFunc("/api/smokes", s.handleSmokes)         // list groups + availability
+	mux.HandleFunc("/api/smokes/run", s.handleSmokeRun)   // run a group (or all)
+	mux.HandleFunc("/api/smokes/plan", s.handleSmokePlan) // step-by-step outline of a group's tests (no run)
 	mux.HandleFunc("/api/investigations", s.handleList)
 	mux.HandleFunc("/api/investigate", s.handleInvestigate)
 	mux.HandleFunc("/api/report", s.handleReport)
@@ -181,6 +182,23 @@ func (s *Server) handleSmokeRun(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	run := smoke.RunGroup(ctx, dir, in.Group, s.app.Inst.URL, s.app.Inst.Token)
 	writeJSON(w, 200, run)
+}
+
+// handleSmokePlan returns a step-by-step outline of each test in a group/spec,
+// read from the spec source (never runs anything).
+func (s *Server) handleSmokePlan(w http.ResponseWriter, r *http.Request) {
+	group := r.URL.Query().Get("group")
+	dir := smoke.Dir(s.app.Repo)
+	if ok, msg := smoke.Available(dir); !ok {
+		writeErr(w, 400, msg)
+		return
+	}
+	plans, err := smoke.Plan(dir, group)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"group": group, "plans": plans})
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {

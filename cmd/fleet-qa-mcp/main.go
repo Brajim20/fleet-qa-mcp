@@ -502,8 +502,8 @@ func printCLIHelp() {
 Workflow (same as the Studio web app):
   investigate <issue> [--mode reproduce|testplan]      run a full investigation, print the report
   queue [--type bug|story|all] [--group #g-*] [--milestone V] [--status S]   list the QA backlog
-  smoke [group] [--status passed|failed|skipped]       run the Playwright smoke suite; pass/fail matrix with test titles
-  plan [group|spec]                                    step-by-step outline of what each smoke test does (no run)
+  smoke [group] [--status passed|failed|skipped]       run the Playwright smoke suite; print pass/fail matrix (with test titles), optionally filtered by status
+  plan [group|spec]                                    print a step-by-step outline of what each smoke test does (reads the spec source, doesn't run it)
   milestones                                           list open release milestones
   spec <issue>                                         generate a Playwright regression test
 

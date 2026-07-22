@@ -93,10 +93,11 @@ func (a *App) investigateAgentic(c *llm.Client, ref, mode, shotDir, shotURLBase 
 	rep.Labels = issue.Labels
 	rep.Group = issue.ProductGroup()
 	rep.IssueURL = issue.HTMLURL
+	rep.IssueBody = issue.Body // full body — the UI shows the whole issue
 	rep.Steps = append(rep.Steps, StepResult{
 		Kind: "issue", Title: "Fetch issue", Tool: "github.issue", Status: "ok",
 		Summary: firstLine(issue.Title),
-		Detail:  fmt.Sprintf("#%d · %s · reported by %s\nLabels: %s\n\n%s", issue.Number, issue.State, issue.Reporter, strings.Join(issue.Labels, ", "), clip(issue.Body, 1500)),
+		Detail:  fmt.Sprintf("#%d · %s · reported by %s\nLabels: %s\n\n%s", issue.Number, issue.State, issue.Reporter, strings.Join(issue.Labels, ", "), issue.Body),
 	})
 	rep.Steps = append(rep.Steps, a.stepTarget(rep)) // resolve target (version/rev/tier)
 

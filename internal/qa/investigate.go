@@ -35,6 +35,7 @@ type Report struct {
 	Group     string       `json:"group"`
 	Labels    []string     `json:"labels"`
 	IssueURL  string       `json:"issueUrl"`
+	IssueBody string       `json:"issueBody"` // full GitHub issue body (untruncated)
 	Instance  string       `json:"instance"`
 	Version   string       `json:"version"`
 	Rev       string       `json:"rev"`
@@ -112,10 +113,11 @@ func (a *App) investigateHeuristic(ref, shotDir, shotURLBase string) *Report {
 	rep.Labels = issue.Labels
 	rep.Group = issue.ProductGroup()
 	rep.IssueURL = issue.HTMLURL
+	rep.IssueBody = issue.Body // full body — the UI shows the whole issue
 	rep.Steps = append(rep.Steps, StepResult{
 		Kind: "issue", Title: "Fetch issue", Tool: "github.issue", Status: "ok",
 		Summary: firstLine(issue.Title),
-		Detail:  fmt.Sprintf("#%d · %s · reported by %s\nLabels: %s\n\n%s", issue.Number, issue.State, issue.Reporter, strings.Join(issue.Labels, ", "), clip(issue.Body, 1200)),
+		Detail:  fmt.Sprintf("#%d · %s · reported by %s\nLabels: %s\n\n%s", issue.Number, issue.State, issue.Reporter, strings.Join(issue.Labels, ", "), issue.Body),
 	})
 
 	// 2. Resolve the live target (version / rev / tier).
