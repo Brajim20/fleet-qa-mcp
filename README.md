@@ -95,6 +95,17 @@ pass the issue number or URL, and Claude will:
 The same pipeline is also available as `./build/fleet-qa-mcp investigate <issue>` from the
 CLI, or via the **QA queue** tab in Fleet QA Studio.
 
+## Claude Code skills
+
+This repo ships a full reference of all Claude Code skills used by the Fleet QA team — see **[SKILLS.md](SKILLS.md)**.
+
+Skills are slash commands you type in Claude Code (e.g. `/lint`, `/review-pr`, `/fix-ci`). There are two kinds:
+
+- **Project skills** — live in `.claude/skills/` and are shared automatically when teammates clone the Fleet repo.
+- **Global user skills** — must be installed once per user via `claude /find-skills playwright`. These include the Playwright skills (`/playwright-cli`, `/playwright-generate-test`, `/playwright-best-practices`).
+
+Quick reference: type `/` in Claude Code to see all available skills, or open [SKILLS.md](SKILLS.md) for descriptions of all 29 skills.
+
 ## Investigations: AI agent or heuristic engine
 
 Two engines, picked automatically:
