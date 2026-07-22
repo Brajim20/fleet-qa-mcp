@@ -32,8 +32,9 @@ It's built so **anyone runs it locally with their own creds** — no shared serv
 
 - **QA queue** — open Fleet `bug`/`story` issues filtered by **type · product group · milestone · status** (real GitHub Project board statuses); investigate any of them.
 - **Reproduce / Run test plan** — execute a ticket's own *Steps to reproduce* (bugs) or *Test plan* (stories) against the live build.
-- **Smoke tests** — run your Playwright smoke suite per product group and see the pass/fail matrix.
+- **Smoke tests** — run your Playwright smoke suite per product group and see the pass/fail matrix (with test titles). Click a **Passed/Failed/Skipped** card to filter the list. Picking a suite **auto-loads its test plan** — a step-by-step outline of what each test does (read from the spec source, no run); suites with no specs show an empty state.
 - On a verdict: **prefilled bug draft** (Fleet template, never auto-posted) or a **generated Playwright regression test**.
+- The full GitHub issue body is shown untruncated in the evidence timeline; click the **Fleet logo** to return to the dashboard.
 
 > To run a free-form investigation, use the `/investigate` skill in Claude Code (see below) or the `investigate` CLI command instead.
 
@@ -60,11 +61,14 @@ It's built so **anyone runs it locally with their own creds** — no shared serv
 | `grep_code` | `grep` | git grep at the deployed revision |
 | `is_in_build` | `is-in-build` | is a commit/PR/cherry-pick in the running build? |
 | `log_search` | `log-search` | which commit introduced a string |
+| `released_in` | `released-in` | when did this bug ship? finds the introducing commit then reports the first stable `fleet-vX.Y.Z` release |
 | `fleet_request` | `request` | authenticated REST (read-only unless `confirm`) |
-| `browser_eval` | `browser-eval` | run JS in real Chromium, optional screenshot |
+| `browser_eval` | `browser-eval` | run JS in real Chromium; screenshot the **buggy element** (`--shot-selector`), highlight it in context (`--shot-highlight`), or capture the whole page (`--full-page`) |
 | `browser_sample_frames` | `sample-frames` | per-frame sampler for timing/visual bugs |
 | `build_issue_url` | `issue` | **prefilled** GitHub issue URL (never submits) |
 | `investigate` | `investigate` | full investigation pipeline (see below) |
+| `smoke_run` | `smoke` | run the Playwright smoke suite; pass/fail matrix with titles, `--status` filter |
+| `smoke_plan` | `plan` | step-by-step outline of what each smoke test does (no run) |
 
 ### Workflow commands (CLI — same orchestrations as the Studio web app)
 
@@ -72,11 +76,21 @@ It's built so **anyone runs it locally with their own creds** — no shared serv
 |---|---|
 | `investigate <issue> [--mode reproduce\|testplan]` | run a full investigation; print evidence, released/unreleased, proposed verdict, draft URL |
 | `queue [--type bug\|story\|all] [--group #g-*] [--milestone V] [--status S]` | list the QA backlog with board statuses |
-| `smoke [group]` | run the Playwright smoke suite; print the pass/fail matrix |
+| `smoke [group] [--status passed\|failed\|skipped]` | run the Playwright smoke suite; pass/fail matrix with test titles, optionally filtered by status |
+| `plan [group\|spec]` | step-by-step outline of what each smoke test does — reads the spec source, never runs it |
 | `milestones` | list open release milestones |
 | `spec <issue>` | generate a Playwright regression test |
 
 e.g. `fleet-qa-mcp queue --group '#g-software' --milestone 4.87.0 --status 'Ready for release'`
+
+```bash
+fleet-qa-mcp released-in "someSymbolOrString"          # when did this bug ship?
+fleet-qa-mcp smoke software --status failed            # only the red software smokes
+fleet-qa-mcp plan software/scripts.spec.ts             # what each test in one spec actually does
+# screenshot the actual bug element, scrolled into view + outlined:
+fleet-qa-mcp browser-eval https://your.instance/policies/new '() => ({})' \
+  --screenshot bug.png --shot-selector ".modal__background" --shot-highlight
+```
 
 ## /investigate skill
 
@@ -89,7 +103,7 @@ pass the issue number or URL, and Claude will:
 1. Call `whoami` to confirm the live instance and deployed revision.
 2. Run the `investigate` tool — fetches the issue, hits the relevant API, opens the page in
    real Chromium, greps the deployed source, classifies released/unreleased.
-3. Deepen with individual tools as needed (`code_at_rev`, `grep_code`, `is_in_build`, …).
+3. Deepen with individual tools as needed (`code_at_rev`, `grep_code`, `is_in_build`, `released_in`, …).
 4. Produce a verdict block and a prefilled bug-report URL for your review.
 
 The same pipeline is also available as `./build/fleet-qa-mcp investigate <issue>` from the
