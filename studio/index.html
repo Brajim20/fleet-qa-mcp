@@ -109,7 +109,7 @@ class Studio extends React.Component {
   state = {
     theme: 'dark', view: 'dashboard', activeId: null, openSteps: {}, modal: null,
     verdict: null, confirmed: {}, copied: false, targetOpen: false,
-    toast: null, running: false, runTick: 0,
+    urlInput: 'https://github.com/fleetdm/fleet/issues/47712', toast: null, running: false, runTick: 0,
     // Resolved target instance (version/rev filled live from the instance when reachable).
     inst: { version: '4.87.0-rc.2606171916', rev: '9c17a71c43', tier: 'Premium', built: 'Jun 17, 2026 19:16 UTC', connected: true },
     // LIVE mode — set true when served by the fleet-qa-mcp `serve` backend.
@@ -122,6 +122,7 @@ class Studio extends React.Component {
     queue: [], queueLoading: false, queueType: 'bug', queueGroup: '#g-software', queueStatus: '', queueMilestone: '', milestones: [], spec: null,
     // Smoke suite runner.
     smokeAvail: null, smokeMsg: '', smokeDir: '', smokeGroups: [], smokeGroup: '', smokeRun: null, smokeRunning: false,
+    smokeStatus: '', smokePlan: null, smokePlanLoading: false,
   };
   // Fleet engineering product groups (the #g-* labels) for the queue filter,
   // matching the org's project boards (github.com/orgs/fleetdm/projects).
@@ -263,13 +264,33 @@ class Studio extends React.Component {
   setQueueMilestone = (e) => this.setState({ queueMilestone:e.target.value }, () => this.loadQueue()); // server-side
   setQueueStatus = (e) => this.setState({ queueStatus:e.target.value });                                // client-side
   // ---- smoke suite ----
-  goSmokes = () => { this.setState({ view:'smokes', targetOpen:false, modal:null }); if (this.state.smokeAvail===null) this.loadSmokes(); };
+  goSmokes = () => {
+    this.setState({ view:'smokes', targetOpen:false, modal:null });
+    if (this.state.smokeAvail===null) this.loadSmokes();
+    else if (this.state.smokeAvail && !this.state.smokePlan) this.loadPlan();
+  };
   loadSmokes(){
     fetch('/api/smokes').then(r=>r.json())
-      .then(d => this.setState({ smokeAvail:!!d.available, smokeMsg:d.message||'', smokeDir:d.dir||'', smokeGroups:d.groups||[] }))
+      .then(d => { this.setState({ smokeAvail:!!d.available, smokeMsg:d.message||'', smokeDir:d.dir||'', smokeGroups:d.groups||[] }); if (d.available) this.loadPlan(); })
       .catch(()=>this.setState({ smokeAvail:false, smokeMsg:'Could not reach the smoke runner' }));
   }
-  setSmokeGroup = (e) => this.setState({ smokeGroup:e.target.value });
+  setSmokeGroup = (e) => {
+    // Switching suite invalidates the previous run's results (they were for a
+    // different suite) and the status filter, and refreshes the test plan for
+    // the newly-selected suite — the plan always reflects the current suite.
+    this.setState({ smokeGroup:e.target.value, smokeRun:null, smokeStatus:'', smokePlan:null }, () => {
+      if (this.state.smokeAvail) this.loadPlan();
+    });
+  };
+  setSmokeStatus = (e) => this.setState({ smokeStatus:e.target.value });
+  loadPlan = () => {
+    if (this.state.smokePlanLoading) return;
+    this.setState({ smokePlanLoading:true, smokePlan:null });
+    fetch('/api/smokes/plan?group='+encodeURIComponent(this.state.smokeGroup))
+      .then(async r => { const d = await r.json().catch(()=>({})); if (!r.ok) return { error: d.error || ('HTTP '+r.status) }; return d; })
+      .then(d => this.setState({ smokePlanLoading:false, smokePlan:d }))
+      .catch(e => this.setState({ smokePlanLoading:false, smokePlan:{ error:'Could not load the test plan: '+e.message } }));
+  };
   runSmokes = () => {
     if (this.state.smokeRunning) return;
     this.setState({ smokeRunning:true, smokeRun:null });
@@ -340,6 +361,7 @@ class Studio extends React.Component {
   get active(){ return this.invByNumber(this.state.activeId); }
 
   goDashboard = () => this.setState({ view:'dashboard', targetOpen:false, modal:null });
+  goNew = () => this.setState({ view:'new', targetOpen:false, modal:null });
   toggleTheme = () => this.setState(s => ({ theme: s.theme==='dark'?'light':'dark' }));
   toggleTarget = () => this.setState(s => ({ targetOpen: !s.targetOpen }));
   toggleNav = () => this.setState(s => ({ navHidden: !s.navHidden }));
@@ -353,6 +375,13 @@ class Studio extends React.Component {
       openSteps: light ? {issue:true} : {issue:true,reproduce:true,rootcause:true,buildcheck:true},
       running:false, runTick: light ? 2 : 99 });
   };
+  runFromInput = () => {
+    if (this.state.live) { this.runLive(this.state.urlInput); return; }
+    const m = (this.state.urlInput||'').match(/(\d{4,6})/);
+    const n = m ? parseInt(m[1],10) : 47712;
+    this.openInv(this.invByNumber(n) ? n : 47712);
+  };
+  onUrlInput = (e) => this.setState({ urlInput: e.target.value });
   toggleStep = (k) => this.setState(s => ({ openSteps:{...s.openSteps,[k]:!s.openSteps[k]} }));
   expandAll = () => { const o={}; this.stepKinds().forEach(k=>o[k]=true); this.setState({openSteps:o}); };
   collapseAll = () => this.setState({ openSteps:{} });
@@ -621,14 +650,15 @@ class Studio extends React.Component {
     const crumbNum = liveActive ? liveActive.number : (inv ? inv.number : null);
     return {
       themeClass:isDark?'':'theme-light', isDark, isLight:!isDark,
-      isDashboard:s.view==='dashboard', isDetail:s.view==='detail', isQueue:s.view==='queue', isSmokes:s.view==='smokes',
-      crumb: s.view==='dashboard'?'Investigations':s.view==='queue'?'QA queue':s.view==='smokes'?'Smoke tests':(crumbNum?'#'+crumbNum:'Investigation'),
-      navDashStyle:navBtn(s.view==='dashboard'), navQueueStyle:navBtn(s.view==='queue'), navSmokesStyle:navBtn(s.view==='smokes'),
+      isDashboard:s.view==='dashboard', isNew:s.view==='new', isDetail:s.view==='detail', isQueue:s.view==='queue', isSmokes:s.view==='smokes',
+      crumb: s.view==='dashboard'?'Investigations':s.view==='new'?'New investigation':s.view==='queue'?'QA queue':s.view==='smokes'?'Smoke tests':(crumbNum?'#'+crumbNum:'Investigation'),
+      navDashStyle:navBtn(s.view==='dashboard'), navNewStyle:navBtn(s.view==='new'), navQueueStyle:navBtn(s.view==='queue'), navSmokesStyle:navBtn(s.view==='smokes'),
       queue:s.queue, queueLoading:s.queueLoading, queueType:s.queueType, queueGroup:s.queueGroup, queueStatus:s.queueStatus, queueMilestone:s.queueMilestone, milestones:s.milestones, spec:s.spec,
       smokeAvail:s.smokeAvail, smokeMsg:s.smokeMsg, smokeDir:s.smokeDir, smokeGroups:s.smokeGroups, smokeGroup:s.smokeGroup, smokeRun:s.smokeRun, smokeRunning:s.smokeRunning,
+      smokeStatus:s.smokeStatus, smokePlan:s.smokePlan, smokePlanLoading:s.smokePlanLoading,
       compact, stackDetail, statsCols, sidebarW, navHidden:s.navHidden,
       navRecent, investigations, stats, examples, targetOpen:s.targetOpen, live:s.live, agent:s.agent, liveActive,
-      inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
+      urlInput:s.urlInput, inv: inv?{...inv,chipBg:invChip.bg,chipFg:invChip.fg}:{}, steps, hasQueued,
       runLabel: s.running?'Running…':'Run remaining checks',
       verdictOptions, verdictConfirmed, verdictUnconfirmed:!verdictConfirmed, confirmedBy:this.USER.name,
       qaComment:this.qaComment(), copyLabel:s.copied?'Copied':'Copy',
@@ -643,7 +673,7 @@ class Studio extends React.Component {
         {/* SIDEBAR */}
         {!v.navHidden && (
         <aside style={{...S("flex:none; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column;"), width:v.sidebarW+'px'}}>
-          <div style={{...S("height:60px; flex:none; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--border);"), padding:v.compact?'0':'0 18px', justifyContent:v.compact?'center':'flex-start'}}>
+          <button onClick={this.goDashboard} title="Back to dashboard" style={{...S("height:60px; flex:none; display:flex; align-items:center; gap:10px; border:none; border-bottom:1px solid var(--border); background:transparent; cursor:pointer; width:100%; text-align:left;"), padding:v.compact?'0':'0 18px', justifyContent:v.compact?'center':'flex-start'}}>
             <FleetLogo size={26}/>
             {!v.compact && (
               <div style={S("display:flex; flex-direction:column; line-height:1.15;")}>
@@ -651,10 +681,13 @@ class Studio extends React.Component {
                 <span style={S("color:var(--text3); font-size:10.5px; letter-spacing:.04em; text-transform:uppercase;")}>Fleet</span>
               </div>
             )}
-          </div>
+          </button>
           <nav style={{...S("display:flex; flex-direction:column; gap:2px;"), padding:v.compact?'14px 8px':'14px 12px'}}>
             <button onClick={this.goDashboard} style={v.navDashStyle} title="Dashboard">
               <Svg d="" ><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></Svg>{!v.compact && ' Dashboard'}
+            </button>
+            <button onClick={this.goNew} style={v.navNewStyle} title="New investigation">
+              <Svg><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></Svg>{!v.compact && ' New investigation'}
             </button>
             {v.live && (
               <button onClick={this.goQueue} style={v.navQueueStyle} title="QA queue">
@@ -736,6 +769,7 @@ class Studio extends React.Component {
 
           <main style={S("flex:1; overflow:auto;")}>
             {v.isDashboard && this.renderDashboard(v)}
+            {v.isNew && this.renderNew(v)}
             {v.isQueue && this.renderQueue(v)}
             {v.isSmokes && this.renderSmokes(v)}
             {v.isDetail && (v.liveActive ? this.renderLiveDetail(v.liveActive, v) : this.renderDetail(v))}
@@ -789,6 +823,9 @@ class Studio extends React.Component {
             <h1 style={S("color:var(--text); font-size:24px; margin:0 0 4px;")}>Investigations</h1>
             <p style={S("color:var(--text3); font-size:14px; margin:0;")}>Evidence-backed verdicts against the live deployed build — not vibes.</p>
           </div>
+          <button onClick={this.goNew} style={S("display:flex; align-items:center; gap:8px; height:40px; padding:0 16px; background:var(--accent); color:#1a1c21; border:none; border-radius:6px; font-weight:600; font-size:13.5px;")}>
+            <Svg sw={2.2} d="M12 5v14M5 12h14"/> New investigation
+          </button>
         </div>
         <div style={S("display:grid; gap:14px; margin-bottom:24px; grid-template-columns:repeat("+v.statsCols+",1fr);")}>
           {v.stats.map((st,i)=>(
@@ -804,7 +841,7 @@ class Studio extends React.Component {
           </div>
           {v.live && v.investigations.length===0 && (
             <div style={S("padding:36px 20px; text-align:center; color:var(--text3); font-size:13px;")}>
-              No investigations yet this session.
+              No investigations yet this session. <button onClick={this.goNew} style={S("background:transparent; border:none; color:var(--accent); font-weight:600; font-size:13px; padding:0; cursor:pointer;")}>Start one →</button>
             </div>
           )}
           {v.investigations.map(item=>(
@@ -818,6 +855,40 @@ class Studio extends React.Component {
               <span><span style={{display:'inline-flex',alignItems:'center',gap:'6px',padding:'4px 10px',borderRadius:'20px',fontSize:'12px',fontWeight:600,whiteSpace:'nowrap',background:item.chipBg,color:item.chipFg}}><span style={{width:'6px',height:'6px',borderRadius:'50%',background:item.chipFg}}/>{item.status}</span></span>
               <span style={S("display:flex; align-items:center; gap:5px; color:var(--text3); font-size:12px;")}><Svg w={14} h={14} d="M3 7h18M3 12h18M3 17h18"/>{item.evidenceCount} steps</span>
               <span style={S("text-align:right; color:var(--text3); font-size:12px;")}>{item.updated}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  renderNew(v){
+    return (
+      <div className="qa-fade" style={S("max-width:680px; margin:0 auto; padding:56px 32px;")}>
+        <h1 style={S("color:var(--text); font-size:24px; margin:0 0 6px;")}>New investigation</h1>
+        <p style={S("color:var(--text3); font-size:14px; margin:0 0 14px;")}>Paste a GitHub issue and Fleet QA Studio reproduces it against the live deployed build, reads the source at the deployed revision, and gathers evidence for a verdict.</p>
+        {v.live && (
+          <div style={S("display:inline-flex; align-items:center; gap:7px; margin-bottom:24px; padding:5px 11px; border-radius:20px; font-size:11.5px; font-weight:600; background:var(--accent-tint); color:var(--accent);")}>
+            <span style={{width:'6px',height:'6px',borderRadius:'50%',background:'var(--accent)'}}/>
+            {v.agent ? 'AI agent — Claude drives the tools' : 'Heuristic engine — deterministic pipeline'}
+          </div>
+        )}
+        <label style={S("display:block; color:var(--text); font-weight:600; font-size:13px; margin-bottom:8px;")}>GitHub issue URL</label>
+        <div style={S("display:flex; gap:10px; margin-bottom:8px;")}>
+          <div style={S("flex:1; display:flex; align-items:center; gap:10px; height:46px; padding:0 14px; background:var(--surface); border:1px solid var(--border); border-radius:8px;")}>
+            <Svg w={18} h={18} fill="currentColor" stroke="none" style={S("color:var(--text3); flex:none;")} d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49v-1.7c-2.78.62-3.37-1.21-3.37-1.21-.46-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.36-2.22-.26-4.55-1.14-4.55-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.27 2.75 1.05a9.4 9.4 0 0 1 5 0c1.91-1.32 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9v2.81c0 .27.18.6.69.49A10.26 10.26 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/>
+            <input value={v.urlInput} onChange={this.onUrlInput} placeholder="https://github.com/fleetdm/fleet/issues/47712" style={S("flex:1; background:transparent; border:none; outline:none; color:var(--text); font-size:14px; font-family:var(--font-mono);")}/>
+          </div>
+          <button onClick={this.runFromInput} style={S("height:46px; padding:0 22px; background:var(--accent); color:#fff; border:none; border-radius:8px; font-weight:600; font-size:14px; white-space:nowrap;")}>Investigate</button>
+        </div>
+        <p style={S("color:var(--text3); font-size:12px; margin:0 0 24px;")}>Reads are free and safe. Writes to the live instance and issue submission always require an explicit confirm.</p>
+        <div style={S("color:var(--text3); font-size:12px; text-align:center; margin:8px 0 18px; position:relative;")}><span style={S("background:var(--bg); padding:0 12px; position:relative; z-index:1;")}>or try one of these</span><span style={S("position:absolute; left:0; right:0; top:50%; height:1px; background:var(--border);")}/></div>
+        <div style={S("display:flex; flex-direction:column; gap:10px;")}>
+          {v.examples.map(ex=>(
+            <button key={ex.number} onClick={ex.onRun} style={S("display:flex; align-items:center; gap:14px; text-align:left; padding:14px 16px; background:var(--surface); border:1px solid var(--border); border-radius:8px; color:var(--text2);")}>
+              <span style={S("font-family:var(--font-mono); font-size:12.5px; color:var(--accent); flex:none;")}>#{ex.number}</span>
+              <span style={S("flex:1; min-width:0;")}><span style={S("display:block; color:var(--text); font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;")}>{ex.title}</span><span style={S("color:var(--text3); font-size:11.5px;")}>{ex.hint}</span></span>
+              <Svg w={16} h={16} style={S("color:var(--text3); flex:none;")} d="m9 18 6-6-6-6"/>
             </button>
           ))}
         </div>
@@ -1000,6 +1071,8 @@ class Studio extends React.Component {
     const selStyle = S("height:34px; padding:0 10px; background:var(--surface); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:12.5px;");
     const run = v.smokeRun;
     const dot = (st) => ({passed:'var(--success)',failed:'var(--danger)',skipped:'var(--text3)'}[st]||'var(--text3)');
+    const allRes = (run && run.results) || [];
+    const shown = v.smokeStatus ? allRes.filter(r=>r.status===v.smokeStatus) : allRes;
     return (
       <div className="qa-fade" style={S("max-width:1080px; margin:0 auto; padding:32px;")}>
         <h1 style={S("color:var(--text); font-size:24px; margin:0 0 4px;")}>Smoke tests</h1>
@@ -1025,6 +1098,37 @@ class Studio extends React.Component {
             <span style={S("color:var(--text3); font-size:11.5px;")}>{v.smokeDir}</span>
           </div>
 
+          {/* Test plan — auto-loads for the selected suite (no button needed). */}
+          {v.smokePlanLoading && (
+            <div style={S("display:flex; align-items:center; gap:10px; padding:14px 16px; background:var(--surface); border:1px solid var(--border); border-radius:8px; color:var(--text2); font-size:13px; margin-bottom:16px;")}>
+              <span className="qa-spin" style={{width:'16px',height:'16px',border:'2.5px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',display:'block',flex:'none'}}/>
+              <span>Loading the test plan for {v.smokeGroup||'all smoke tests'}…</span>
+            </div>
+          )}
+          {!v.smokePlanLoading && v.smokePlan && (
+            v.smokePlan.error
+              ? <div style={S("display:flex; gap:10px; padding:14px 16px; background:rgba(255,92,131,.10); border:1px solid rgba(255,92,131,.3); border-radius:8px; color:var(--text2); font-size:13px; margin-bottom:16px;")}><span>{v.smokePlan.error}</span></div>
+              : (v.smokePlan.plans||[]).length===0
+              ? <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:36px 18px; text-align:center; margin-bottom:18px;")}>
+                  <Svg w={24} h={24} stroke="var(--text3)" sw={1.8} style={S("margin:0 auto 10px;")} d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                  <div style={S("color:var(--text2); font-size:14px; font-weight:600; margin-bottom:4px;")}>No available test cases for this suite</div>
+                  <div style={S("color:var(--text3); font-size:12.5px;")}>No <b style={{color:'var(--text2)'}}>{v.smokeGroup||'smoke'}</b> specs define any tests yet.</div>
+                </div>
+              : <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px 0; margin-bottom:18px;")}>
+                  <div style={S("padding:8px 18px 12px; color:var(--text3); font-size:12px; border-bottom:1px solid var(--border);")}>Test plan — {(v.smokePlan.plans||[]).length} tests in <b style={{color:'var(--text2)'}}>{v.smokeGroup||'all smoke tests'}</b> (from the spec source, not a run)</div>
+                  {(v.smokePlan.plans||[]).map((p,i)=>(
+                    <div key={i} style={S("padding:12px 18px; border-bottom:1px solid var(--border);")}>
+                      <div style={S("color:var(--text); font-size:13px; font-weight:600;")}>{p.describe ? p.describe+' › '+p.title : p.title}</div>
+                      <div style={S("color:var(--text3); font-size:11px; font-family:var(--font-mono); margin:2px 0 6px;")}>{p.file}</div>
+                      <ol style={S("margin:0; padding-left:20px; color:var(--text2); font-size:12.5px; line-height:1.7;")}>
+                        {(p.steps||[]).map((st,j)=><li key={j}>{st}</li>)}
+                        {(p.steps||[]).length===0 && <li style={{color:'var(--text3)',listStyle:'none',marginLeft:'-20px'}}>(no extractable steps)</li>}
+                      </ol>
+                    </div>
+                  ))}
+                </div>
+          )}
+
           {v.smokeRunning && (
             <div style={S("display:flex; align-items:center; gap:12px; padding:16px; background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-bottom:16px;")}>
               <span className="qa-spin" style={{width:'18px',height:'18px',border:'2.5px solid var(--accent)',borderTopColor:'transparent',borderRadius:'50%',display:'block',flex:'none'}}/>
@@ -1039,15 +1143,26 @@ class Studio extends React.Component {
               ? <div style={S("display:flex; gap:10px; padding:14px 16px; background:var(--well); border:1px solid var(--border); border-radius:8px; color:var(--text2); font-size:13px;")}><Svg w={16} h={16} stroke="var(--warning)" sw={2.2} style={S("flex:none; margin-top:1px;")} d="M12 9v4M12 17h.01|M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><span>No specs ran. Usually the e2e auth setup failed — check that the instance is reachable and the admin token is valid (the server terminal logs the Playwright output).</span></div>
               : (<>
                 <div style={S("display:grid; gap:14px; margin-bottom:18px; grid-template-columns:repeat("+v.statsCols+",1fr);")}>
-                  {[['Passed',run.passed,'#3db67b'],['Failed',run.failed,'#ff5c83'],['Skipped',run.skipped,'#8b8fa2'],['Duration',Math.round(run.durationMs/1000)+'s','#6a67fe']].map(([lbl,val,col])=>(
-                    <div key={lbl} style={S("background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px 18px;")}>
-                      <div style={{fontSize:'26px',fontWeight:600,color:col,fontVariantNumeric:'tabular-nums',lineHeight:1}}>{val}</div>
-                      <div style={S("color:var(--text3); font-size:12.5px; margin-top:6px;")}>{lbl}</div>
-                    </div>
-                  ))}
+                  {[['Passed',run.passed,'#3db67b','passed'],['Failed',run.failed,'#ff5c83','failed'],['Skipped',run.skipped,'#8b8fa2','skipped'],['Duration',Math.round(run.durationMs/1000)+'s','#6a67fe',null]].map(([lbl,val,col,st])=>{
+                    const active = st && v.smokeStatus===st;
+                    return (
+                      <div key={lbl} onClick={st?(()=>this.setState({smokeStatus:active?'':st})):undefined}
+                        title={st?'Click to show only '+st:undefined}
+                        style={S("background:var(--surface); border:1px solid "+(active?col:'var(--border)')+"; border-radius:8px; padding:16px 18px;"+(st?' cursor:pointer;':''))}>
+                        <div style={{fontSize:'26px',fontWeight:600,color:col,fontVariantNumeric:'tabular-nums',lineHeight:1}}>{val}</div>
+                        <div style={S("color:var(--text3); font-size:12.5px; margin-top:6px;")}>{lbl}</div>
+                      </div>
+                    );
+                  })}
                 </div>
+                {v.smokeStatus && (
+                  <div style={S("display:flex; align-items:center; gap:8px; margin-bottom:10px; color:var(--text3); font-size:12px;")}>
+                    <span>Showing <b style={{color:dot(v.smokeStatus)}}>{v.smokeStatus}</b> only ({shown.length})</span>
+                    <button onClick={()=>this.setState({smokeStatus:''})} style={S("height:24px; padding:0 10px; background:transparent; border:1px solid var(--border); border-radius:5px; color:var(--text2); font-size:11px; cursor:pointer;")}>Clear filter</button>
+                  </div>
+                )}
                 <div style={S("background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow-x:auto;")}>
-                  {run.results.map((res,i)=>(
+                  {shown.map((res,i)=>(
                     <div key={i} style={S("display:grid; grid-template-columns:20px minmax(0,1fr) 70px; gap:12px; align-items:center; padding:11px 18px; border-bottom:1px solid var(--border);")}>
                       <span style={{width:'10px',height:'10px',borderRadius:'50%',background:dot(res.status),flex:'none'}}/>
                       <span style={S("min-width:0;")}>
@@ -1211,7 +1326,7 @@ class Studio extends React.Component {
                     {open && (
                       <div className="qa-fade" style={S("border:1px solid var(--border); border-top:none; border-radius:0 0 8px 8px; margin-top:-1px; padding:16px; background:var(--surface);")}>
                         {step.detail
-                          ? <pre style={S("margin:0; background:var(--code-bg); color:var(--code-fg); padding:14px; border-radius:6px; font-size:12px; line-height:1.6; overflow:auto; white-space:pre-wrap; max-height:340px;")}>{step.detail}</pre>
+                          ? <pre style={S("margin:0; background:var(--code-bg); color:var(--code-fg); padding:14px; border-radius:6px; font-size:12px; line-height:1.6; overflow:auto; white-space:pre-wrap; max-height:"+(step.kind==='issue'?'none':'70vh')+";")}>{step.detail}</pre>
                           : <div style={S("color:var(--text3); font-size:12.5px;")}>{step.summary}</div>}
                         {step.image && <img src={step.image} alt="repro screenshot" style={{display:'block',width:'100%',marginTop:'12px',borderRadius:'6px',border:'1px solid var(--border)'}}/>}
                       </div>
